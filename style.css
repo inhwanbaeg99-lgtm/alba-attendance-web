@@ -159,18 +159,18 @@ ul {
 }
 
 /* ---------- 관리자 PIN ---------- */
-.home-inner {
+.home {
   position: relative;
 }
 
-/* 달력 박스 바로 위 가운데 (박스는 화면 세로 가운데 그대로) */
+/* 관리자 화면 상단 메뉴와 같은 높이 (위 40px) */
 .unlock {
   position: absolute;
-  bottom: calc(100% + 18px);
+  top: calc(40px + env(safe-area-inset-top, 0px));
   left: 50%;
   transform: translateX(-50%);
   z-index: 5;
-  height: 38px;
+  height: 43px;
   display: flex;
   align-items: center;
 }
@@ -688,8 +688,10 @@ ul {
   color: var(--ink);
 }
 
-.staff .add-btn:hover {
-  box-shadow: inset 0 0 0 1.5px var(--line);
+.staff .add-btn:hover,
+.staff .add-btn:focus {
+  box-shadow: none;
+  outline: none;
 }
 
 .add-form {
@@ -1251,7 +1253,14 @@ td.name {
 .ps-side .add-btn {
   margin-top: 0;
   height: 38px;
+  border: 0;
+  background: var(--paper);
   font-size: 13px;
+  color: var(--ink);
+}
+
+.ps-side .add-btn:hover {
+  background: color-mix(in srgb, var(--ink) 8%, var(--paper));
 }
 
 .ps-side .action-row {

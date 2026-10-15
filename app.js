@@ -1986,6 +1986,13 @@ app.addEventListener("input", (e) => {
   t.classList.remove("invalid");
   const digits = t.value.replace(/\D/g, "").slice(0, 4);
   t.value = digits.length > 2 ? `${digits.slice(0, 2)}:${digits.slice(2)}` : digits;
+  // 시작 시간 4자리를 다 치면 종료 시간 칸으로 넘어간다
+  const next = { "slot-start": "slot-end", "edit-start": "edit-end", "extra-start": "extra-end", "f-start": "f-end" }[t.id];
+  if (next && digits.length === 4) {
+    const el = document.getElementById(next);
+    el?.focus();
+    el?.select();
+  }
 });
 
 // 화면이 넓어지면 모바일 날짜 페이지를 홈 패널로, 좁아지면 그 반대로 전환
