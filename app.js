@@ -229,9 +229,9 @@ function recordFor(employeeId, date) {
   return store.records.find((r) => r.employeeId === employeeId && r.date === date);
 }
 
-// 그날의 근무 시간: 날짜별로 수정한 시간(store.shifts)이 있으면 그것, 없으면 직원 기본 시간
+// 그날의 근무 시간: 날짜별로 수정한 시간(store.shifts)이 있으면 그것, 없으면 그날 적용되는 근무표 시간
 function shiftFor(emp, date) {
-  return store.shifts[date]?.[emp.id] ?? emp.weekly[weekdayOf(date)] ?? { start: "09:00", end: "18:00" };
+  return store.shifts[date]?.[emp.id] ?? weeklyOn(emp, date)[weekdayOf(date)] ?? { start: "09:00", end: "18:00" };
 }
 
 function setShift(empId, date, start, end) {
@@ -243,7 +243,7 @@ function scheduledOn(date) {
   const wd = weekdayOf(date);
   const extra = store.shifts[date] ?? {};
   return store.employees
-    .filter((e) => e.active && !isManager(e) && (e.weekly[wd] || extra[e.id]))
+    .filter((e) => e.active && !isManager(e) && (weeklyOn(e, date)[wd] || extra[e.id]))
     .sort((a, b) => (shiftFor(a, date).start < shiftFor(b, date).start ? -1 : 1));
 }
 
@@ -329,7 +329,11 @@ function scheduleStart() {
   const m = (store.scheduleMeta?.period ?? "").match(/(\d{1,2})\s*\.\s*(\d{1,2})/);
   const today = todayDateString();
   if (!m) return today;
-  return `${today.slice(0, 4)}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
+  const md = `${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
+  const year = Number(today.slice(0, 4));
+  // 연도가 없으니 오늘과 가장 가까운 해로 본다 (12월에 "1. 5" → 내년, 1월에 "12. 28" → 작년)
+  const gap = Number(md.slice(0, 2)) - Number(today.slice(5, 7));
+  return `${gap <= -6 ? year + 1 : gap >= 6 ? year - 1 : year}-${md}`;
 }
 
 function syncWeekday(emp, wd) {
@@ -766,10 +770,11 @@ function monthRecords(ym, employeeId) {
 }
 
 function isScheduled(emp, date) {
-  return Boolean(emp.weekly[weekdayOf(date)] || store.shifts[date]?.[emp.id]);
+  return Boolean(weeklyOn(emp, date)[weekdayOf(date)] || store.shifts[date]?.[emp.id]);
 }
 
-// 그 날짜에 적용되던 요일별 고정 근무 (근무표를 바꾸기 전 날짜는 바꾸기 전 근무표)
+// 그 날짜에 적용되는 요일별 고정 근무
+// 근무표를 저장하면 기간 시작일부터 새 근무표, 그 전 날짜는 바꾸기 전 근무표 (시작일이 미래여도 그날까지는 기존 근무표)
 function weeklyOn(emp, date) {
   if (!emp.weeklyHistory) return emp.weekly;
   let weekly = emp.weeklyBase;
