@@ -438,8 +438,8 @@ function renderTimeEditor(empId, start, end) {
       ${timeInput("edit-end", end, "종료 시간")}
     </div>
     <div class="action-row">
-      <button type="button" class="btn-primary" data-action="save-shift" data-id="${empId}">저장</button>
       <button type="button" class="btn-ghost" data-action="cancel-edit">취소</button>
+      <button type="button" class="btn-primary" data-action="save-shift" data-id="${empId}">저장</button>
     </div>
     ${state.error ? `<p class="error">${esc(state.error)}</p>` : ""}`;
 }
@@ -457,8 +457,8 @@ function renderAddExtra() {
         ${timeInput("extra-end", "18:00", "종료 시간")}
       </div>
       <div class="action-row">
-        <button type="submit" class="btn-primary">등록</button>
         <button type="button" class="btn-ghost" data-action="cancel-add">취소</button>
+        <button type="submit" class="btn-primary">등록</button>
       </div>
     </form>`;
 }
