@@ -189,9 +189,16 @@ function clockIn(employeeId) {
   if (!emp || !emp.active) return "직원을 찾을 수 없습니다.";
   const date = todayDateString();
   if (recordFor(employeeId, date)?.clockIn) return "이미 출근 처리되었습니다.";
-  const now = new Date().toISOString();
-  const end = scheduledEnd(emp, date);
-  store.records.push({ id: uid(), employeeId, date, clockIn: now, clockOut: end > now ? end : now, createdAt: now });
+  // 누른 시각이 아니라 그날 근무 시간대로 출퇴근을 기록한다
+  const { start } = shiftFor(emp, date);
+  store.records.push({
+    id: uid(),
+    employeeId,
+    date,
+    clockIn: kstIso(date, start),
+    clockOut: scheduledEnd(emp, date),
+    createdAt: new Date().toISOString(),
+  });
   save();
   return null;
 }
