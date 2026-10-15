@@ -3,7 +3,8 @@
 
 const TIME_ZONE = "Asia/Seoul";
 const ADMIN_PIN = "1234";
-const STORE_KEY = "alba-attendance:v3";
+const STORE_KEY = "alba-attendance:v4";
+const DEFAULT_WAGE = 10320; // 2026년 최저시급
 const ADMIN_KEY = "alba-attendance:admin";
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 const MAX_VISIBLE = 3;
@@ -91,27 +92,29 @@ function uid() {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
 
-function sampleData() {
-  const employees = [
-    { id: uid(), name: "김민수", phone: "01012345678", hourlyWage: 10030, active: true, start: "09:00", end: "15:00", days: [1, 2, 3, 4, 5] },
-    { id: uid(), name: "이서연", phone: null, hourlyWage: 10030, active: true, start: "15:00", end: "21:30", days: [0, 3, 4, 5, 6] },
-    { id: uid(), name: "박지훈", phone: null, hourlyWage: 10500, active: true, start: "10:00", end: "16:00", days: [0, 1, 2, 6] },
-  ];
-  const today = todayDateString();
-  const records = [];
-  for (let back = 1; back <= 14; back++) {
-    const date = addDays(today, -back);
-    for (const e of employees) {
-      if (!e.days.includes(weekdayOf(date))) continue;
-      const clockIn = kstIso(date, e.start);
-      records.push({ id: uid(), employeeId: e.id, date, clockIn, clockOut: endIso(date, e.start, e.end), createdAt: clockIn });
-    }
-  }
-  // 오늘 이미 출근한 직원 한 명
-  const first = employees.find((e) => e.days.includes(weekdayOf(today))) ?? employees[0];
-  const startedAt = kstIso(today, first.start);
-  records.push({ id: uid(), employeeId: first.id, date: today, clockIn: startedAt, clockOut: endIso(today, first.start, first.end), createdAt: startedAt });
-  return { employees, records, shifts: {} };
+// 요일별 근무표 (0=일 … 6=토). 같은 사람도 요일마다 시간이 다를 수 있다.
+const INITIAL_SCHEDULE = [
+  ["배예빈", { 1: "07:00~12:00", 2: "07:00~12:00", 3: "07:00~15:00", 4: "07:00~12:00", 6: "10:00~15:00" }],
+  ["백인환", { 1: "12:00~18:00", 3: "15:00~22:30", 4: "15:00~23:00", 5: "12:00~18:00" }],
+  ["이시헌", { 1: "18:00~22:30", 5: "18:00~23:00", 6: "15:00~23:00", 0: "15:00~22:30" }],
+  ["정현욱", { 1: "18:00~22:30", 2: "18:00~22:30", 4: "18:00~23:00" }],
+  ["김예린", { 2: "12:00~18:00", 3: "12:00~18:00", 5: "07:00~12:00" }],
+  ["최수빈", { 2: "18:00~22:30", 6: "10:00~18:00", 0: "10:00~15:00" }],
+  ["백인서", { 3: "18:00~22:30" }],
+  ["손민영", { 4: "12:00~18:00" }],
+  ["최광효", { 5: "18:00~23:00", 6: "18:00~23:00", 0: "16:00~22:30" }],
+];
+
+function initialData() {
+  const employees = INITIAL_SCHEDULE.map(([name, days]) => ({
+    id: uid(),
+    name,
+    phone: null,
+    hourlyWage: DEFAULT_WAGE,
+    active: true,
+    weekly: Object.fromEntries(Object.entries(days).map(([wd, range]) => [wd, parseRange(range)])),
+  }));
+  return { employees, records: [], shifts: {} };
 }
 
 function loadStore() {
@@ -119,7 +122,7 @@ function loadStore() {
     const raw = localStorage.getItem(STORE_KEY);
     if (raw) return { shifts: {}, ...JSON.parse(raw) };
   } catch {}
-  return sampleData();
+  return initialData();
 }
 
 let store = loadStore();
@@ -148,7 +151,7 @@ function recordFor(employeeId, date) {
 
 // 그날의 근무 시간: 날짜별로 수정한 시간(store.shifts)이 있으면 그것, 없으면 직원 기본 시간
 function shiftFor(emp, date) {
-  return store.shifts[date]?.[emp.id] ?? { start: emp.start, end: emp.end };
+  return store.shifts[date]?.[emp.id] ?? emp.weekly[weekdayOf(date)] ?? { start: "09:00", end: "18:00" };
 }
 
 function setShift(empId, date, start, end) {
@@ -160,7 +163,7 @@ function scheduledOn(date) {
   const wd = weekdayOf(date);
   const extra = store.shifts[date] ?? {};
   return store.employees
-    .filter((e) => e.active && (e.days.includes(wd) || extra[e.id]))
+    .filter((e) => e.active && (e.weekly[wd] || extra[e.id]))
     .sort((a, b) => (shiftFor(a, date).start < shiftFor(b, date).start ? -1 : 1));
 }
 
@@ -227,6 +230,17 @@ function normalizeTime(text) {
   if (Number(hh) > 23 || Number(mm) > 59) return null;
   return `${hh.padStart(2, "0")}:${mm}`;
 }
+
+// "7-12", "07:00~12:00", "18-2230" 같은 근무 시간 범위. 틀리면 null.
+function parseRange(text) {
+  const parts = String(text).split(/[~\-–]/);
+  if (parts.length !== 2) return null;
+  const start = normalizeTime(parts[0]);
+  const end = normalizeTime(parts[1]);
+  return start && end ? { start, end } : null;
+}
+
+const formatRange = (r) => (r ? `${r.start}~${r.end}` : "");
 
 // 비워 두면 placeholder(기존 시간)를 그대로 쓴다. 형식이 틀리면 null.
 function readTime(id) {
@@ -464,7 +478,7 @@ function renderDayArea(date, { closable }) {
 }
 
 function demoNote() {
-  return `<p class="demo-note">데모 버전 · 데이터는 이 기기의 브라우저에만 저장됩니다 · <button type="button" data-action="reset-data">샘플 데이터로 초기화</button></p>`;
+  return `<p class="demo-note">데이터는 이 기기의 브라우저에만 저장됩니다 · <button type="button" data-action="reset-data">처음 상태로 초기화</button></p>`;
 }
 
 function renderHome() {
@@ -512,30 +526,21 @@ function renderAdminShell(active, content) {
     <main class="admin-main">${content}</main>`;
 }
 
-function dayToggles(days, empId) {
-  return `<div class="day-toggles">${WEEKDAYS.map(
-    (w, i) =>
-      `<button type="button" class="day-toggle${days.includes(i) ? " on" : ""}" ${
-        empId ? `data-action="toggle-day" data-id="${empId}"` : `data-action="toggle-new-day"`
-      } data-day="${i}" aria-pressed="${days.includes(i)}">${w}</button>`,
-  ).join("")}</div>`;
-}
-
-let newEmployeeDays = [1, 2, 3, 4, 5];
-
 function renderEmployees() {
+  // 표는 월요일부터
+  const order = [1, 2, 3, 4, 5, 6, 0];
   const rows = store.employees
     .map(
       (e) => `
       <tr>
         <td class="name">${esc(e.name)}<div class="muted small">${esc(e.phone || "")}</div></td>
-        <td>${dayToggles(e.days, e.id)}</td>
-        <td class="time-cell">
-          <input class="field time" type="text" inputmode="numeric" maxlength="5" placeholder="09:00" value="${e.start}" data-time="start" data-id="${e.id}" aria-label="${esc(e.name)} 시작 시간" />
-          ~
-          <input class="field time" type="text" inputmode="numeric" maxlength="5" placeholder="18:00" value="${e.end}" data-time="end" data-id="${e.id}" aria-label="${esc(e.name)} 종료 시간" />
-        </td>
-        <td><input class="field" style="width:96px;padding:4px 8px" type="number" value="${e.hourlyWage}" data-wage="${e.id}" aria-label="${esc(e.name)} 시급" /></td>
+        ${order
+          .map(
+            (wd) =>
+              `<td class="day-cell"><input class="field range" type="text" placeholder="-" value="${formatRange(e.weekly[wd])}" data-weekly="${wd}" data-id="${e.id}" aria-label="${esc(e.name)} ${WEEKDAYS[wd]}요일 근무 시간" /></td>`,
+          )
+          .join("")}
+        <td><input class="field" style="width:88px;padding:4px 8px" type="number" value="${e.hourlyWage}" data-wage="${e.id}" aria-label="${esc(e.name)} 시급" /></td>
         <td><button type="button" class="status${e.active ? " on" : ""}" data-action="toggle-active" data-id="${e.id}">${e.active ? "재직중" : "비활성"}</button></td>
         <td><button type="button" class="danger" data-action="remove-employee" data-id="${e.id}">삭제</button></td>
       </tr>`,
@@ -549,19 +554,14 @@ function renderEmployees() {
     <form class="toolbar" id="add-employee" style="margin-bottom:32px">
       <div><label for="f-name">이름</label><input id="f-name" class="field" style="width:112px" required /></div>
       <div><label for="f-phone">전화번호 (선택)</label><input id="f-phone" class="field" style="width:144px" placeholder="01012345678" /></div>
-      <div><label>근무 요일</label>${dayToggles(newEmployeeDays)}</div>
-      <div>
-        <label for="f-start">근무 시간</label>
-        ${timeInput("f-start", "09:00", "시작 시간")} ~
-        ${timeInput("f-end", "18:00", "종료 시간")}
-      </div>
-      <div><label for="f-wage">시급(원)</label><input id="f-wage" class="field" style="width:112px" type="number" value="10030" required /></div>
+      <div><label for="f-wage">시급(원)</label><input id="f-wage" class="field" style="width:112px" type="number" value="${DEFAULT_WAGE}" required /></div>
       <button type="submit" class="pill">추가</button>
     </form>
+    <p class="hint">요일 칸에 <b>7-12</b>, <b>18-2230</b> 처럼 입력하면 근무 시간이 저장돼요. 비우면 쉬는 날이에요.</p>
     <div class="table-wrap">
-      <table>
-        <thead><tr><th>이름</th><th>근무 요일</th><th>근무 시간</th><th>시급</th><th>상태</th><th>관리</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="6" class="empty">등록된 직원이 없습니다.</td></tr>`}</tbody>
+      <table class="schedule">
+        <thead><tr><th>이름</th>${order.map((wd) => `<th class="${wd === 0 ? "rest" : ""}">${WEEKDAYS[wd]}</th>`).join("")}<th>시급</th><th>상태</th><th>관리</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="11" class="empty">등록된 직원이 없습니다.</td></tr>`}</tbody>
       </table>
     </div>`,
   );
@@ -851,23 +851,6 @@ app.addEventListener("click", (e) => {
       save();
       break;
     }
-    case "toggle-day":
-    case "toggle-new-day": {
-      const day = Number(el.dataset.day);
-      const flip = (days) => (days.includes(day) ? days.filter((x) => x !== day) : [...days, day].sort());
-      if (action === "toggle-day") {
-        const emp = employeeById(id);
-        emp.days = flip(emp.days);
-        save();
-      } else {
-        newEmployeeDays = flip(newEmployeeDays);
-        // 입력 중인 값이 지워지지 않도록 버튼만 갱신
-        el.classList.toggle("on");
-        el.setAttribute("aria-pressed", String(newEmployeeDays.includes(day)));
-        return;
-      }
-      break;
-    }
     case "remove-employee": {
       const emp = employeeById(id);
       if (!window.confirm(`${emp.name}님을 삭제하시겠습니까? 근무 기록도 함께 삭제됩니다.`)) return;
@@ -880,8 +863,8 @@ app.addEventListener("click", (e) => {
       exportCsv();
       return;
     case "reset-data":
-      if (!window.confirm("모든 데이터를 지우고 샘플 데이터로 되돌릴까요?")) return;
-      store = sampleData();
+      if (!window.confirm("출근 기록과 수정한 내용을 모두 지우고 처음 근무표로 되돌릴까요?")) return;
+      store = initialData();
       save();
       state.selectedDate = null;
       state.expandedId = null;
@@ -925,18 +908,14 @@ app.addEventListener("submit", (e) => {
   const name = document.getElementById("f-name").value.trim();
   const phone = document.getElementById("f-phone").value.trim();
   const wage = Number(document.getElementById("f-wage").value);
-  const start = readTime("f-start") ?? "09:00";
-  const end = readTime("f-end") ?? "18:00";
   if (!name) return;
   store.employees.push({
     id: uid(),
     name,
     phone: phone || null,
-    hourlyWage: Number.isFinite(wage) ? wage : 0,
+    hourlyWage: Number.isFinite(wage) ? wage : DEFAULT_WAGE,
     active: true,
-    start,
-    end,
-    days: [...newEmployeeDays],
+    weekly: {},
   });
   save();
   render();
@@ -952,14 +931,23 @@ app.addEventListener("change", (e) => {
     }
     return;
   }
-  if (t.dataset.time) {
+  if (t.dataset.weekly) {
     const emp = employeeById(t.dataset.id);
-    const value = normalizeTime(t.value);
-    if (value) {
-      emp[t.dataset.time] = value;
+    const wd = t.dataset.weekly;
+    if (!t.value.trim()) {
+      delete emp.weekly[wd];
       save();
+    } else {
+      const range = parseRange(t.value);
+      if (range) {
+        emp.weekly[wd] = range;
+        save();
+      } else {
+        t.classList.add("invalid");
+        setTimeout(() => t.classList.remove("invalid"), 1200);
+      }
     }
-    t.value = emp[t.dataset.time];
+    t.value = formatRange(emp.weekly[wd]);
     return;
   }
   const filter = t.dataset.filter;
@@ -981,7 +969,7 @@ function addExtra() {
   }
   let emp = store.employees.find((x) => x.active && x.name === name);
   if (!emp) {
-    emp = { id: uid(), name, phone: null, hourlyWage: 10030, active: true, start, end, days: [] };
+    emp = { id: uid(), name, phone: null, hourlyWage: DEFAULT_WAGE, active: true, weekly: {} };
     store.employees.push(emp);
   }
   setShift(emp.id, activeDate(), start, end);
