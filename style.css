@@ -1031,3 +1031,225 @@ td.name {
   text-decoration: underline;
   color: var(--ink-sub);
 }
+
+/* ---------- 월별 근무표 ---------- */
+.timesheet {
+  width: auto;
+  min-width: 100%;
+  font-size: 12px;
+}
+
+.timesheet th,
+.timesheet td {
+  border: 1px solid var(--line);
+  padding: 6px 2px;
+  text-align: center;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.timesheet th {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.timesheet .ts-day {
+  min-width: 32px;
+}
+
+.timesheet .weekend {
+  background: var(--accent-soft);
+}
+
+.timesheet .ts-no {
+  min-width: 36px;
+}
+
+.timesheet .ts-name {
+  min-width: 64px;
+  font-weight: 600;
+}
+
+.timesheet .ts-total {
+  min-width: 52px;
+  font-weight: 700;
+}
+
+.timesheet td {
+  background: var(--bg);
+}
+
+.timesheet td.weekend {
+  background: var(--accent-soft);
+}
+
+.link-btn {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+/* ---------- 급여명세서 ---------- */
+.ps-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+  padding: 24px;
+}
+
+.ps-dialog {
+  max-height: 100%;
+  display: flex;
+  gap: 20px;
+  border-radius: 20px;
+  background: var(--bg);
+  padding: 20px;
+  overflow: auto;
+}
+
+.ps-side {
+  width: 300px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ps-allow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ps-allow-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ps-allow-row .field {
+  min-width: 0;
+  flex: 1;
+  background: var(--paper);
+}
+
+.ps-allow-row .ps-allow-amount {
+  flex: 0 0 96px;
+  text-align: right;
+}
+
+.ps-side .add-btn {
+  margin-top: 0;
+  height: 38px;
+  font-size: 13px;
+}
+
+.ps-side .action-row {
+  margin-top: auto;
+}
+
+.ps-preview {
+  flex-shrink: 0;
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px var(--line);
+  overflow: hidden;
+  zoom: 0.62;
+}
+
+.ps-stage {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+}
+
+/* 종이는 화면 테마와 상관없이 흰 바탕 검정 글씨 (A4: 794 x 1123px) */
+.payslip {
+  width: 794px;
+  height: 1123px;
+  padding: 92px 116px 0;
+  background: #ffffff;
+  color: #111111;
+  font-family:
+    "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", -apple-system, sans-serif;
+}
+
+.ps-title {
+  margin: 0 0 44px;
+  text-align: center;
+  font-size: 32px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+
+.ps-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  margin-bottom: 46px;
+  font-size: 19px;
+}
+
+.ps-table td {
+  height: 46px;
+  border: 1.5px solid #111111;
+  padding: 0 14px;
+  white-space: nowrap;
+}
+
+.ps-head {
+  background: #c5e5f3;
+}
+
+.ps-label {
+  padding: 0 22px !important;
+}
+
+.spread {
+  display: flex;
+  justify-content: space-between;
+}
+
+.ps-label.tight {
+  font-size: 15px;
+  padding: 0 12px !important;
+}
+
+.ps-center {
+  text-align: center;
+}
+
+.ps-spaced {
+  letter-spacing: 0.6em;
+  text-indent: 0.6em;
+}
+
+.ps-amount {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.ps-strong {
+  font-weight: 700;
+}
+
+.ps-body {
+  margin-bottom: 30px;
+}
+
+.ps-thanks {
+  margin: 0 0 30px;
+  text-align: center;
+  font-family: "Nanum Pen Script", cursive;
+  font-size: 30px;
+}
+
+.ps-store {
+  margin: 0;
+  text-align: center;
+  font-size: 26px;
+  font-weight: 500;
+}

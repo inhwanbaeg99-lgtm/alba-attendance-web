@@ -9,7 +9,6 @@ const ADMIN_KEY = "alba-attendance:admin";
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 const MAX_VISIBLE = 5;
 const PIN_LENGTH = 4;
-const XLSX_SRC = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
 const PANEL_ANIM_MS = 320;
 
 // 2026년 대한민국 법정공휴일 (대체공휴일 포함)
@@ -315,6 +314,7 @@ const state = {
   unlockOpen: false,
   error: "",
   payroll: { month: "", employeeId: "" }, // 근무 기록 화면: "2026-10"
+  payslipId: null, // 급여명세서 창을 연 직원
 };
 
 {
@@ -641,26 +641,39 @@ function taxes(gross) {
   return { income, local: floor10(income * 0.1) };
 }
 
+// 직원별·월별 추가 수당 (교육수당, 특근수당 등). 기본은 교육수당 한 줄.
+function allowancesFor(ym, empId) {
+  return store.allowances?.[ym]?.[empId] ?? [{ name: "교육수당", amount: 0 }];
+}
+
+function setAllowances(ym, empId, list) {
+  store.allowances = store.allowances ?? {};
+  store.allowances[ym] = { ...store.allowances[ym], [empId]: list };
+}
+
+function payrollRow(emp, ym, recs) {
+  const mine = recs.filter((r) => r.employeeId === emp.id);
+  const hours = mine.reduce((sum, r) => sum + hoursBetween(r.clockIn, r.clockOut), 0);
+  const base = Math.round(hours * emp.hourlyWage);
+  const weekly = weeklyAllowance(emp, ym);
+  const allowances = allowancesFor(ym, emp.id);
+  const extra = allowances.reduce((sum, a) => sum + (Number(a.amount) || 0), 0);
+  const gross = base + weekly.total + extra;
+  const tax = taxes(gross);
+  return { emp, days: mine.length, hours, base, weekly, allowances, extra, gross, ...tax, net: gross - tax.income - tax.local };
+}
+
 function payrollFor(ym, employeeId) {
   const recs = monthRecords(ym, employeeId);
-  const ids = [...new Set(recs.map((r) => r.employeeId))];
-  const rows = store.employees
-    .filter((e) => ids.includes(e.id))
-    .map((emp) => {
-      const mine = recs.filter((r) => r.employeeId === emp.id);
-      const hours = mine.reduce((sum, r) => sum + hoursBetween(r.clockIn, r.clockOut), 0);
-      const base = Math.round(hours * emp.hourlyWage);
-      const weekly = weeklyAllowance(emp, ym);
-      const gross = base + weekly.total;
-      const tax = taxes(gross);
-      return { emp, days: mine.length, hours, base, weekly, gross, ...tax, net: gross - tax.income - tax.local };
-    });
+  const ids = new Set(recs.map((r) => r.employeeId));
+  const rows = store.employees.filter((e) => ids.has(e.id)).map((emp) => payrollRow(emp, ym, recs));
   const sum = (k) => rows.reduce((acc, r) => acc + r[k], 0);
   const total = {
     days: sum("days"),
     hours: sum("hours"),
     base: sum("base"),
     weekly: rows.reduce((acc, r) => acc + r.weekly.total, 0),
+    extra: sum("extra"),
     gross: sum("gross"),
     income: sum("income"),
     local: sum("local"),
@@ -670,13 +683,156 @@ function payrollFor(ym, employeeId) {
 }
 
 const won = (n) => `${n.toLocaleString()}원`;
+const num = (n) => (n ? n.toLocaleString() : "-");
 const hrs = (n) => `${Number(n.toFixed(2))}시간`;
+const hour1 = (n) => (n ? n.toFixed(1) : "");
 const shortDate = (d) => `${Number(d.slice(5, 7))}/${Number(d.slice(8))} (${WEEKDAYS[weekdayOf(d)]})`;
 
 function shiftMonth(ym, delta) {
   const [y, m] = ym.split("-").map(Number);
   const d = new Date(y, m - 1 + delta, 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function monthDays(ym) {
+  const [y, m] = ym.split("-").map(Number);
+  const n = new Date(y, m, 0).getDate();
+  return Array.from({ length: n }, (_, i) => `${ym}-${String(i + 1).padStart(2, "0")}`);
+}
+
+// 월별 근무표: 한 사람이 한 줄, 1일~말일 칸에 그날 근무시간
+function timesheet(ym, employeeId) {
+  const days = monthDays(ym);
+  const recs = monthRecords(ym, employeeId);
+  const ids = new Set(recs.map((r) => r.employeeId));
+  const people = store.employees.filter((e) => ids.has(e.id));
+  const rows = people.map((emp) => {
+    const cells = days.map((d) => {
+      const rec = recs.find((r) => r.employeeId === emp.id && r.date === d);
+      return rec ? hoursBetween(rec.clockIn, rec.clockOut) : 0;
+    });
+    return { emp, cells, total: cells.reduce((a, b) => a + b, 0) };
+  });
+  return { days, rows };
+}
+
+function renderTimesheet(ym, employeeId) {
+  const { days, rows } = timesheet(ym, employeeId);
+  if (!rows.length) return `<div class="table-wrap"><p class="empty">이 달의 근무 기록이 없습니다.</p></div>`;
+  const wkClass = (d) => {
+    const wd = weekdayOf(d);
+    return wd === 0 || wd === 6 ? " weekend" : "";
+  };
+  return `
+    <div class="table-wrap">
+      <table class="timesheet">
+        <thead>
+          <tr>
+            <th rowspan="2" class="ts-no">No.</th>
+            <th rowspan="2" class="ts-name">성명</th>
+            ${days.map((d) => `<th class="ts-day${wkClass(d)}">${WEEKDAYS[weekdayOf(d)]}</th>`).join("")}
+            <th rowspan="2" class="ts-total">시간</th>
+          </tr>
+          <tr>${days.map((d) => `<th class="ts-day${wkClass(d)}">${Number(d.slice(8))}</th>`).join("")}</tr>
+        </thead>
+        <tbody>
+          ${rows
+            .map(
+              (r, i) => `
+            <tr>
+              <td class="ts-no">${i + 1}</td>
+              <td class="ts-name">${esc(r.emp.name)}</td>
+              ${r.cells.map((h, j) => `<td class="ts-day${wkClass(days[j])}">${hour1(h)}</td>`).join("")}
+              <td class="ts-total">${r.total.toFixed(1)}</td>
+            </tr>`,
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+// ---------- 급여명세서 ----------
+
+const STORE_NAME = "메가MGC커피 춘천온의파크점";
+
+// "기본급" → "기   본   급" 처럼 칸 너비에 맞춰 글자를 벌린다 (PDF 변환에서도 유지되도록 글자마다 span)
+const spread = (label) => `<span class="spread">${[...label.replace(/\s/g, "")].map((c) => `<span>${esc(c)}</span>`).join("")}</span>`;
+
+function renderPayslip(r, ym) {
+  const month = Number(ym.slice(5, 7));
+  const pay = [
+    ["기본급", r.base],
+    ["주휴수당", r.weekly.total],
+    ...r.allowances.map((a) => [a.name, Number(a.amount) || 0]),
+  ];
+  while (pay.length < 5) pay.push(["", null]);
+  const deduct = [
+    ["소득세", r.income],
+    ["지방소득세", r.local],
+  ];
+  const rows = pay
+    .map((p, i) => {
+      const d = deduct[i] ?? ["", null];
+      const cell = (label, value) =>
+        `<td class="ps-label${label.length > 5 ? " tight" : ""}">${label ? spread(label) : ""}</td><td class="ps-amount">${value === null ? "" : num(value)}</td>`;
+      return `<tr>${cell(p[0], p[1])}${cell(d[0], d[1])}</tr>`;
+    })
+    .join("");
+  const deductTotal = r.income + r.local;
+
+  return `
+    <div class="payslip">
+      <h1 class="ps-title">아르바이트 급여명세서</h1>
+      <table class="ps-table">
+        <tr><td class="ps-head ps-label">${spread("성명")}</td><td class="ps-center ps-spaced">${esc(r.emp.name)}</td><td class="ps-head ps-label">${spread("지급월")}</td><td class="ps-center">${month}월</td></tr>
+        <tr><td class="ps-head ps-label">${spread("시급")}</td><td class="ps-amount">${num(r.emp.hourlyWage)}</td><td class="ps-head ps-label">${spread("총근무시간")}</td><td class="ps-amount">${Number(r.hours.toFixed(2))}</td></tr>
+      </table>
+      <table class="ps-table ps-body">
+        <tr><td colspan="2" class="ps-head ps-center ps-spaced">지급</td><td colspan="2" class="ps-head ps-center ps-spaced">공제</td></tr>
+        ${rows}
+        <tr><td class="ps-label">${spread("①소계")}</td><td class="ps-amount">${num(r.gross)}</td><td class="ps-label">${spread("②소계")}</td><td class="ps-amount">${num(deductTotal)}</td></tr>
+        <tr><td colspan="2" class="ps-center ps-strong">지 급 금 액(①-②)</td><td colspan="2" class="ps-amount ps-strong">${num(r.net)}</td></tr>
+      </table>
+      <p class="ps-thanks">이번 한달도 수고많으셨습니다. 감사합니다.</p>
+      <p class="ps-store">${STORE_NAME}</p>
+    </div>`;
+}
+
+function renderPayslipModal() {
+  const empId = state.payslipId;
+  if (!empId) return "";
+  const { month } = state.payroll;
+  const emp = employeeById(empId);
+  const r = payrollRow(emp, month, monthRecords(month, empId));
+  const list = r.allowances;
+  return `
+    <div class="ps-backdrop" data-action="close-payslip">
+      <div class="ps-dialog" data-stop>
+        <div class="ps-side">
+          <p class="staff-title">${esc(emp.name)} · ${Number(month.slice(5, 7))}월 명세서</p>
+          <p class="sub">수당을 입력하면 지급액과 세금이 다시 계산돼요.</p>
+          <div class="ps-allow">
+            ${list
+              .map(
+                (a, i) => `
+              <div class="ps-allow-row">
+                <input class="field" value="${esc(a.name)}" placeholder="수당 이름" data-allow="name" data-index="${i}" aria-label="수당 이름" />
+                <input class="field ps-allow-amount" type="text" inputmode="numeric" value="${a.amount ? Number(a.amount).toLocaleString() : ""}" placeholder="0" data-allow="amount" data-index="${i}" aria-label="${esc(a.name || "수당")} 금액" />
+                <button type="button" class="danger" data-action="remove-allowance" data-index="${i}" aria-label="삭제">삭제</button>
+              </div>`,
+              )
+              .join("")}
+            <button type="button" class="add-btn" data-action="add-allowance">+ 수당 추가</button>
+          </div>
+          <div class="action-row">
+            <button type="button" class="btn-ghost" data-action="close-payslip">닫기</button>
+            <button type="button" class="btn-primary" data-action="payslip-pdf" data-id="${empId}">PDF 저장</button>
+          </div>
+        </div>
+        <div class="ps-preview">${renderPayslip(r, month)}</div>
+      </div>
+    </div>`;
 }
 
 function renderRecords() {
@@ -692,30 +848,16 @@ function renderRecords() {
         <td class="name">${esc(r.emp.name)}</td>
         <td class="num">${r.days}일</td>
         <td class="num">${hrs(r.hours)}</td>
-        <td class="num">${won(r.emp.hourlyWage)}</td>
         <td class="num">${won(r.base)}</td>
         <td class="num" title="${esc(r.weekly.weeks.map((w) => `${shortDate(w.mon)}~${shortDate(w.sun)} ${hrs(w.hours)} ${w.reason || `→ ${won(w.amount)}`}`).join("\n"))}">${won(r.weekly.total)}</td>
+        <td class="num">${won(r.extra)}</td>
         <td class="num strong">${won(r.gross)}</td>
         <td class="num">${won(r.income)}</td>
         <td class="num">${won(r.local)}</td>
         <td class="num strong">${won(r.net)}</td>
+        <td><button type="button" class="link-btn" data-action="open-payslip" data-id="${r.emp.id}">명세서</button></td>
       </tr>`,
     )
-    .join("");
-
-  const detail = recs
-    .map((r) => {
-      const emp = employeeById(r.employeeId);
-      const h = hoursBetween(r.clockIn, r.clockOut);
-      return `
-      <tr>
-        <td>${shortDate(r.date)}</td>
-        <td class="name">${esc(emp.name)}</td>
-        <td>${formatTime(r.clockIn)} ~ ${formatTime(r.clockOut)}</td>
-        <td class="num">${hrs(h)}</td>
-        <td class="num">${won(Math.round(h * emp.hourlyWage))}</td>
-      </tr>`;
-    })
     .join("");
 
   return renderAdminShell(
@@ -741,18 +883,22 @@ function renderRecords() {
           <option value="none"${taxOn ? "" : " selected"}>공제 안 함</option>
         </select>
       </div>
-      <button type="button" class="pill" data-action="export-xlsx"${recs.length ? "" : " disabled"}>엑셀 다운로드</button>
+      <button type="button" class="pill plain" data-action="export-xlsx"${recs.length ? "" : " disabled"}>엑셀 다운로드</button>
+      <button type="button" class="pill" data-action="payslip-pdf-all"${rows.length ? "" : " disabled"}>명세서 PDF ${rows.length > 1 ? "(전체)" : ""}</button>
     </div>
+
+    <h3>근무표</h3>
+    ${renderTimesheet(month, employeeId)}
 
     <h3>급여 정산</h3>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>이름</th><th class="num">근무일</th><th class="num">근무시간</th><th class="num">시급</th><th class="num">기본급</th><th class="num">주휴수당</th><th class="num">지급총액</th><th class="num">소득세</th><th class="num">지방소득세</th><th class="num">실지급액</th></tr></thead>
+        <thead><tr><th>이름</th><th class="num">근무일</th><th class="num">근무시간</th><th class="num">기본급</th><th class="num">주휴수당</th><th class="num">수당</th><th class="num">지급총액</th><th class="num">소득세</th><th class="num">지방소득세</th><th class="num">실지급액</th><th></th></tr></thead>
         <tbody>
-          ${summary || `<tr><td colspan="10" class="empty">이 달의 근무 기록이 없습니다.</td></tr>`}
+          ${summary || `<tr><td colspan="11" class="empty">이 달의 근무 기록이 없습니다.</td></tr>`}
           ${
             rows.length > 1
-              ? `<tr class="total-row"><td>합계</td><td class="num">${total.days}일</td><td class="num">${hrs(total.hours)}</td><td></td><td class="num">${won(total.base)}</td><td class="num">${won(total.weekly)}</td><td class="num">${won(total.gross)}</td><td class="num">${won(total.income)}</td><td class="num">${won(total.local)}</td><td class="num">${won(total.net)}</td></tr>`
+              ? `<tr class="total-row"><td>합계</td><td class="num">${total.days}일</td><td class="num">${hrs(total.hours)}</td><td class="num">${won(total.base)}</td><td class="num">${won(total.weekly)}</td><td class="num">${won(total.extra)}</td><td class="num">${won(total.gross)}</td><td class="num">${won(total.income)}</td><td class="num">${won(total.local)}</td><td class="num">${won(total.net)}</td><td></td></tr>`
               : ""
           }
         </tbody>
@@ -760,47 +906,98 @@ function renderRecords() {
     </div>
     <p class="hint small-hint">
       주휴수당: 월~일 한 주에 15시간 이상 일하고 근무표상 근무일에 모두 출근하면 (주 근무시간 ÷ 40) × 8시간 × 시급. 그 주가 끝나는 일요일이 속한 달에 포함되고, 아직 끝나지 않은 주는 빠져요. 금액에 마우스를 올리면 주별 내역이 보여요.<br />
+      수당(교육수당·특근수당 등)은 이름 옆 <b>명세서</b>를 눌러 입력해요.
       ${taxOn ? "세금: 소득세 3% + 지방소득세(소득세의 10%), 10원 미만 절사. 소득세가 1,000원 미만이면 공제하지 않아요." : "세금을 공제하지 않고 계산했어요."}
     </p>
-
-    <h3>근무 상세</h3>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>날짜</th><th>이름</th><th>시간</th><th class="num">근무시간</th><th class="num">금액</th></tr></thead>
-        <tbody>${detail || `<tr><td colspan="5" class="empty">이 달의 근무 기록이 없습니다.</td></tr>`}</tbody>
-      </table>
-    </div>`,
+    ${renderPayslipModal()}`,
   );
 }
 
-// ---------- 엑셀 ----------
+// ---------- 외부 라이브러리 (필요할 때만 불러옴) ----------
 
-function loadXlsx() {
-  if (window.XLSX) return Promise.resolve(window.XLSX);
+const LIBS = {
+  xlsx: { src: "https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js", ready: () => window.XLSX },
+  html2canvas: { src: "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js", ready: () => window.html2canvas },
+  jspdf: { src: "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js", ready: () => window.jspdf?.jsPDF },
+};
+
+function loadLib(name) {
+  const lib = LIBS[name];
+  if (lib.ready()) return Promise.resolve(lib.ready());
   return new Promise((resolve, reject) => {
     const el = document.createElement("script");
-    el.src = XLSX_SRC;
-    el.onload = () => resolve(window.XLSX);
-    el.onerror = () => reject(new Error("엑셀 라이브러리를 불러오지 못했어요. 인터넷 연결을 확인해주세요."));
+    el.src = lib.src;
+    el.onload = () => resolve(lib.ready());
+    el.onerror = () => reject(new Error("파일 만드는 도구를 불러오지 못했어요. 인터넷 연결을 확인해주세요."));
     document.head.appendChild(el);
   });
 }
 
-async function exportXlsx(button) {
-  const { month, employeeId } = state.payroll;
-  const { recs, rows, total } = payrollFor(month, employeeId);
+async function withBusy(button, text, task) {
   const label = button.textContent;
   button.disabled = true;
-  button.textContent = "만드는 중…";
+  button.textContent = text;
   try {
-    const XLSX = await loadXlsx();
+    await task();
+  } catch (err) {
+    window.alert(err.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = label;
+  }
+}
+
+// ---------- 엑셀 ----------
+
+function exportXlsx(button) {
+  return withBusy(button, "만드는 중…", async () => {
+    const XLSX = await loadLib("xlsx");
+    const { month, employeeId } = state.payroll;
+    const { recs, rows, total } = payrollFor(month, employeeId);
     const round2 = (n) => Math.round(n * 100) / 100;
 
-    const summary = [
-      ["이름", "근무일", "근무시간", "시급", "기본급", "주휴수당", "지급총액", "소득세", "지방소득세", "실지급액"],
-      ...rows.map((r) => [r.emp.name, r.days, round2(r.hours), r.emp.hourlyWage, r.base, r.weekly.total, r.gross, r.income, r.local, r.net]),
+    const thin = { style: "thin", color: { rgb: "000000" } };
+    const border = { top: thin, bottom: thin, left: thin, right: thin };
+    const center = { horizontal: "center", vertical: "center" };
+    const style = (extra = {}) => ({ border, alignment: center, font: { name: "맑은 고딕", sz: 10 }, ...extra });
+    const blue = { fill: { patternType: "solid", fgColor: { rgb: "DCE9F7" } } };
+
+    // 근무표 시트: 사진처럼 No. / 성명 / 요일·날짜 / 시간
+    const ts = timesheet(month, employeeId);
+    const isWeekend = (d) => [0, 6].includes(weekdayOf(d));
+    const head1 = ["No.", "성명", ...ts.days.map((d) => WEEKDAYS[weekdayOf(d)]), "시간"];
+    const head2 = ["", "", ...ts.days.map((d) => Number(d.slice(8))), ""];
+    const body = ts.rows.map((r, i) => [i + 1, r.emp.name, ...r.cells.map((h) => (h ? round2(h) : "")), round2(r.total)]);
+    const wsTs = XLSX.utils.aoa_to_sheet([head1, head2, ...body]);
+    const lastCol = head1.length - 1;
+    for (let R = 0; R < body.length + 2; R++) {
+      for (let C = 0; C <= lastCol; C++) {
+        const ref = XLSX.utils.encode_cell({ r: R, c: C });
+        wsTs[ref] = wsTs[ref] ?? { t: "s", v: "" };
+        const day = C >= 2 && C < lastCol ? ts.days[C - 2] : null;
+        const s = style(day && isWeekend(day) ? blue : {});
+        if (R < 2) s.font = { ...s.font, bold: true };
+        if (R >= 2 && day && typeof wsTs[ref].v === "number") wsTs[ref].z = "0.0";
+        if (R >= 2 && C === lastCol) {
+          wsTs[ref].z = "0.0";
+          s.font = { ...s.font, bold: true };
+        }
+        wsTs[ref].s = s;
+      }
+    }
+    wsTs["!merges"] = [
+      { s: { r: 0, c: 0 }, e: { r: 1, c: 0 } },
+      { s: { r: 0, c: 1 }, e: { r: 1, c: 1 } },
+      { s: { r: 0, c: lastCol }, e: { r: 1, c: lastCol } },
     ];
-    if (rows.length > 1) summary.push(["합계", total.days, round2(total.hours), "", total.base, total.weekly, total.gross, total.income, total.local, total.net]);
+    wsTs["!cols"] = [{ wch: 5 }, { wch: 9 }, ...ts.days.map(() => ({ wch: 4.5 })), { wch: 7 }];
+    wsTs["!rows"] = [{ hpt: 22 }, { hpt: 22 }, ...body.map(() => ({ hpt: 22 }))];
+
+    const summary = [
+      ["이름", "근무일", "근무시간", "시급", "기본급", "주휴수당", "수당", "지급총액", "소득세", "지방소득세", "실지급액"],
+      ...rows.map((r) => [r.emp.name, r.days, round2(r.hours), r.emp.hourlyWage, r.base, r.weekly.total, r.extra, r.gross, r.income, r.local, r.net]),
+    ];
+    if (rows.length > 1) summary.push(["합계", total.days, round2(total.hours), "", total.base, total.weekly, total.extra, total.gross, total.income, total.local, total.net]);
 
     const detail = [
       ["날짜", "요일", "이름", "출근", "퇴근", "근무시간", "시급", "금액"],
@@ -816,23 +1013,59 @@ async function exportXlsx(button) {
       for (const w of r.weekly.weeks) weekly.push([r.emp.name, w.mon, w.sun, round2(w.hours), round2(w.allowHours), w.amount, w.reason || ""]);
     }
 
-    const sheet = (aoa, widths) => {
+    const plain = (aoa, widths, moneyFrom) => {
       const ws = XLSX.utils.aoa_to_sheet(aoa);
       ws["!cols"] = widths.map((wch) => ({ wch }));
+      const range = XLSX.utils.decode_range(ws["!ref"]);
+      for (let R = 0; R <= range.e.r; R++) {
+        for (let C = 0; C <= range.e.c; C++) {
+          const ref = XLSX.utils.encode_cell({ r: R, c: C });
+          if (!ws[ref]) continue;
+          ws[ref].s = { border, font: { name: "맑은 고딕", sz: 10, bold: R === 0 }, ...(R === 0 ? blue : {}) };
+          if (R > 0 && moneyFrom !== undefined && C >= moneyFrom && typeof ws[ref].v === "number") ws[ref].z = "#,##0";
+        }
+      }
       return ws;
     };
+
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, sheet(summary, [10, 8, 10, 9, 12, 12, 12, 10, 11, 12]), "급여 정산");
-    XLSX.utils.book_append_sheet(wb, sheet(detail, [12, 6, 10, 8, 8, 10, 9, 11]), "근무 상세");
-    XLSX.utils.book_append_sheet(wb, sheet(weekly, [10, 12, 12, 10, 10, 11, 16]), "주휴수당 내역");
+    XLSX.utils.book_append_sheet(wb, wsTs, "근무표");
+    XLSX.utils.book_append_sheet(wb, plain(summary, [10, 8, 10, 9, 12, 12, 10, 12, 10, 11, 12], 3), "급여 정산");
+    XLSX.utils.book_append_sheet(wb, plain(detail, [12, 6, 10, 8, 8, 10, 9, 11], 6), "근무 상세");
+    XLSX.utils.book_append_sheet(wb, plain(weekly, [10, 12, 12, 10, 10, 11, 16], 5), "주휴수당 내역");
     const who = employeeId ? `_${employeeById(employeeId).name}` : "";
     XLSX.writeFile(wb, `근무기록_${month}${who}.xlsx`);
-  } catch (err) {
-    window.alert(err.message);
-  } finally {
-    button.disabled = false;
-    button.textContent = label;
-  }
+  });
+}
+
+// ---------- PDF (급여명세서) ----------
+
+async function payslipPdf(button, empIds) {
+  return withBusy(button, "PDF 만드는 중…", async () => {
+    const [html2canvas, jsPDF] = await Promise.all([loadLib("html2canvas"), loadLib("jspdf")]);
+    await document.fonts.ready;
+    const { month } = state.payroll;
+    const recs = monthRecords(month);
+
+    // A4 비율 종이를 화면 밖에 그려서 한 장씩 이미지로 찍는다
+    const stage = document.createElement("div");
+    stage.className = "ps-stage";
+    document.body.appendChild(stage);
+    try {
+      const pdf = new jsPDF({ unit: "mm", format: "a4" });
+      for (const [i, id] of empIds.entries()) {
+        const r = payrollRow(employeeById(id), month, recs);
+        stage.innerHTML = renderPayslip(r, month);
+        const canvas = await html2canvas(stage.firstElementChild, { scale: 2, backgroundColor: "#ffffff" });
+        if (i > 0) pdf.addPage();
+        pdf.addImage(canvas.toDataURL("image/jpeg", 0.95), "JPEG", 0, 0, 210, 297);
+      }
+      const who = empIds.length === 1 ? `_${employeeById(empIds[0]).name}` : "_전체";
+      pdf.save(`급여명세서_${month}${who}.pdf`);
+    } finally {
+      stage.remove();
+    }
+  });
 }
 
 // ---------- 라우팅 ----------
@@ -876,6 +1109,7 @@ function navigate(hash) {
 
 window.addEventListener("hashchange", () => {
   resetDayUi();
+  state.payslipId = null;
   state.unlockOpen = false;
   render();
 });
@@ -943,7 +1177,9 @@ app.addEventListener("click", (e) => {
   }
 
   const el = e.target.closest("[data-action]");
-  if (!el) {
+  // 명세서 창 안쪽 빈 곳을 누르면 바깥(닫기)으로 전달되지 않게
+  const insideDialog = el?.classList.contains("ps-backdrop") && e.target.closest("[data-stop]");
+  if (!el || insideDialog) {
     if (closedUnlock) render();
     return;
   }
@@ -1044,7 +1280,30 @@ app.addEventListener("click", (e) => {
     case "payroll-prev":
     case "payroll-next":
       state.payroll.month = shiftMonth(state.payroll.month, action === "payroll-prev" ? -1 : 1);
+      state.payslipId = null;
       break;
+    case "open-payslip":
+      state.payslipId = id;
+      break;
+    case "close-payslip":
+      state.payslipId = null;
+      break;
+    case "add-allowance":
+    case "remove-allowance": {
+      const { month } = state.payroll;
+      const list = [...allowancesFor(month, state.payslipId)];
+      if (action === "add-allowance") list.push({ name: "", amount: 0 });
+      else list.splice(Number(el.dataset.index), 1);
+      setAllowances(month, state.payslipId, list);
+      save();
+      break;
+    }
+    case "payslip-pdf":
+      payslipPdf(el, [id]);
+      return;
+    case "payslip-pdf-all":
+      payslipPdf(el, payrollFor(state.payroll.month, state.payroll.employeeId).rows.map((r) => r.emp.id));
+      return;
     case "reset-data":
       if (!window.confirm("출근 기록과 수정한 내용을 모두 지우고 처음 근무표로 되돌릴까요?")) return;
       store = initialData();
@@ -1118,6 +1377,16 @@ app.addEventListener("change", (e) => {
       }
     }
     t.value = formatRange(emp.weekly[wd]);
+    return;
+  }
+  if (t.dataset.allow) {
+    const { month } = state.payroll;
+    const list = allowancesFor(month, state.payslipId).map((a) => ({ ...a }));
+    const item = list[Number(t.dataset.index)];
+    item[t.dataset.allow] = t.dataset.allow === "amount" ? Number(t.value.replace(/\D/g, "")) || 0 : t.value.trim();
+    setAllowances(month, state.payslipId, list);
+    save();
+    render();
     return;
   }
   if (t.dataset.payroll) {
