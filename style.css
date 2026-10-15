@@ -1402,3 +1402,53 @@ td.name {
 .sched-sheet.capturing .sc-period {
   border-bottom-color: transparent;
 }
+
+/* 근무표 편집 */
+.sched td[data-action] {
+  cursor: pointer;
+}
+
+.sched td.sc-name:hover {
+  box-shadow: inset 0 0 0 2px #3182f6;
+}
+
+.sched td.sc-empty:hover {
+  background-color: #eaf2fe;
+}
+
+.sched-sheet.capturing td {
+  box-shadow: none !important;
+}
+
+.slot-dialog {
+  width: min(320px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-radius: 20px;
+  background: var(--bg);
+  padding: 20px;
+}
+
+.slot-dialog .field {
+  background: var(--paper);
+}
+
+.slot-dialog .field.time {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+
+.slot-dialog .edit-row {
+  margin: 0;
+}
+
+.danger-ghost {
+  color: var(--red);
+}
+
+.slot-cancel {
+  align-self: center;
+  color: var(--ink-sub);
+}

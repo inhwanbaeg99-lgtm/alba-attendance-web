@@ -160,7 +160,7 @@ function fillSchedule(data, from, to) {
       const shift = e.weekly[weekdayOf(date)];
       if (!shift || has.has(`${e.id}|${date}`)) continue;
       const clockIn = kstIso(date, shift.start);
-      data.records.push({ id: uid(), employeeId: e.id, date, clockIn, clockOut: endIso(date, shift.start, shift.end), createdAt: clockIn });
+      data.records.push({ id: uid(), employeeId: e.id, date, clockIn, clockOut: endIso(date, shift.start, shift.end), createdAt: clockIn, auto: true });
     }
   }
 }
@@ -240,6 +240,7 @@ function clockIn(employeeId) {
   // 누른 시각이 아니라 그날 근무 시간대로 출퇴근을 기록한다
   const { start } = shiftFor(emp, date);
   store.records.push({
+    manual: true,
     id: uid(),
     employeeId,
     date,
@@ -279,6 +280,12 @@ if (!store.scheduleMeta) {
   if (!store.employees.some(isManager)) store.employees.push(managerEmployee());
   store.scheduleMeta = structuredClone(INITIAL_SCHEDULE_META);
 }
+// 예전 데이터: 오늘 이전 기록은 근무표로 자동 채운 것으로 표시
+if (!store.autoMarked) {
+  const today = todayDateString();
+  for (const r of store.records) if (r.date < today && !r.manual) r.auto = true;
+  store.autoMarked = true;
+}
 // 직원 순서를 근무표 배치 순서로 한 번 맞춘다 (목록에 없는 사람은 뒤로)
 if (!store.orderSet) {
   const rank = (e) => {
@@ -289,6 +296,44 @@ if (!store.orderSet) {
   store.orderSet = true;
 }
 save();
+
+// ---------- 근무표 변경 → 근무 기록 연동 ----------
+// 근무표 제목의 기간 시작일(예: "10. 5 ~ 11. 8" → 2026-10-05)부터 오늘까지의 기록을 새 근무 시간에 맞춘다.
+// - 날짜별로 따로 수정한 날(store.shifts)은 건드리지 않는다
+// - 자동으로 채운 지난 기록: 시간 변경 / 근무 추가 시 생성 / 근무 삭제 시 제거
+// - 직접 출근한 기록: 시간만 맞추고 지우지는 않는다
+function scheduleStart() {
+  const m = (store.scheduleMeta?.period ?? "").match(/(\d{1,2})\s*\.\s*(\d{1,2})/);
+  const today = todayDateString();
+  if (!m) return today;
+  return `${today.slice(0, 4)}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
+}
+
+function syncWeekday(emp, wd) {
+  if (isManager(emp)) return;
+  const today = todayDateString();
+  for (let date = scheduleStart(); date <= today; date = addDays(date, 1)) {
+    if (String(weekdayOf(date)) !== String(wd) || store.shifts[date]?.[emp.id]) continue;
+    const shift = emp.weekly[wd];
+    const rec = recordFor(emp.id, date);
+    if (shift) {
+      const clockIn = kstIso(date, shift.start);
+      const clockOut = endIso(date, shift.start, shift.end);
+      if (rec) Object.assign(rec, { clockIn, clockOut });
+      else if (date < today) store.records.push({ id: uid(), employeeId: emp.id, date, clockIn, clockOut, createdAt: clockIn, auto: true });
+    } else if (rec?.auto) {
+      store.records = store.records.filter((r) => r !== rec);
+    }
+  }
+}
+
+// 요일 근무 시간 변경 (근무표·직원 관리 공용). range 가 없으면 그 요일은 쉬는 날.
+function setWeekly(emp, wd, range) {
+  if (range) emp.weekly[wd] = range;
+  else delete emp.weekly[wd];
+  syncWeekday(emp, wd);
+  save();
+}
 
 // ---------- 유틸 ----------
 
@@ -359,6 +404,7 @@ const state = {
   error: "",
   payroll: { month: "", employeeId: "" }, // 근무 기록 화면: "2026-10"
   payslipId: null, // 급여명세서 창을 연 직원
+  slotEdit: null, // 근무표에서 편집 중인 칸 { wd, empId, start }
 };
 
 {
@@ -1180,9 +1226,10 @@ function renderScheduleSheet() {
               const sameAll = group.length > 1 && group.every((r) => occupant(col, r) === who);
               if (sameAll && gi > 0) return "";
               const span = sameAll ? ` rowspan="${group.length}"` : "";
-              if (!who) return `<td class="sc-empty"${span}></td>`;
+              const slot = `data-action="edit-slot" data-wd="${d.wd}" data-start="${row.start}"`;
+              if (!who) return `<td class="sc-empty" ${slot}${span}></td>`;
               const bg = who.emp.color || "#ffffff";
-              return `<td class="sc-name"${span} style="background:${bg};color:${textOn(bg)}">${esc(who.emp.name)}</td>`;
+              return `<td class="sc-name" ${slot} data-id="${who.emp.id}"${span} style="background:${bg};color:${textOn(bg)}">${esc(who.emp.name)}</td>`;
             })
             .join(""),
         )
@@ -1217,11 +1264,67 @@ function renderSchedule() {
     "schedule",
     `
     <div class="sched-bar">
-      <p class="hint">직원 관리의 요일별 근무 시간으로 자동으로 만들어져요. 제목의 기간과 비고 칸은 눌러서 바로 고칠 수 있어요.</p>
+      <p class="hint">
+        이름 칸을 누르면 시간 수정·삭제, 빈 칸(사선)을 누르면 근무자 추가예요. 바꾸면 직원 관리·달력·근무 기록에 바로 반영돼요.<br />
+        지난 근무 기록은 제목 기간의 시작일(<b>${shortDate(scheduleStart())}</b>)부터 바뀌어요. 제목의 기간과 비고 칸도 눌러서 고칠 수 있어요.
+      </p>
       <button type="button" class="pill" data-action="schedule-pdf">PDF 저장</button>
     </div>
-    <div class="sched-scroll">${renderScheduleSheet()}</div>`,
+    <div class="sched-scroll">${renderScheduleSheet()}</div>
+    ${renderSlotEditor()}`,
   );
+}
+
+function renderSlotEditor() {
+  const ed = state.slotEdit;
+  if (!ed) return "";
+  const emp = ed.empId ? employeeById(ed.empId) : null;
+  const shift = emp?.weekly[ed.wd];
+  const start = shift?.start ?? fromMin(ed.start).padStart(5, "0");
+  const end = shift?.end ?? fromMin(Math.min(ed.start + 6 * 60, 23 * 60)).padStart(5, "0");
+  const choices = store.employees.filter((e) => e.active && !e.weekly[ed.wd]);
+  return `
+    <div class="ps-backdrop" data-action="close-slot">
+      <form class="slot-dialog" id="slot-form" data-stop>
+        <p class="staff-title">${WEEKDAYS[ed.wd]}요일 · ${emp ? esc(emp.name) : "근무자 추가"}</p>
+        <p class="sub">${shortDate(scheduleStart())}부터 매주 ${WEEKDAYS[ed.wd]}요일에 적용돼요.</p>
+        ${
+          emp
+            ? ""
+            : `<select id="slot-emp" class="field" required aria-label="직원">
+                ${choices.map((e) => `<option value="${e.id}">${esc(e.name)}${isManager(e) ? " (매니저)" : ""}</option>`).join("")}
+              </select>`
+        }
+        <div class="edit-row">
+          ${timeInput("slot-start", start, "시작 시간")}
+          <span>~</span>
+          ${timeInput("slot-end", end, "종료 시간")}
+        </div>
+        ${state.error ? `<p class="error">${esc(state.error)}</p>` : ""}
+        <div class="action-row">
+          ${emp ? `<button type="button" class="btn-ghost danger-ghost" data-action="remove-slot">삭제</button>` : `<button type="button" class="btn-ghost" data-action="close-slot">취소</button>`}
+          <button type="submit" class="btn-primary">${emp ? "저장" : "추가"}</button>
+        </div>
+        ${emp ? `<button type="button" class="link-btn slot-cancel" data-action="close-slot">취소</button>` : ""}
+      </form>
+    </div>`;
+}
+
+function saveSlot() {
+  const ed = state.slotEdit;
+  const emp = employeeById(ed.empId ?? document.getElementById("slot-emp")?.value);
+  if (!emp) return;
+  const start = readTime("slot-start");
+  const end = readTime("slot-end");
+  if (!start || !end || start === end) {
+    state.error = "시간은 09:00 처럼 숫자로 입력해주세요.";
+    render();
+    return;
+  }
+  setWeekly(emp, ed.wd, { start, end });
+  state.slotEdit = null;
+  state.error = "";
+  render();
 }
 
 async function schedulePdf(button) {
@@ -1304,6 +1407,7 @@ function navigate(hash) {
 window.addEventListener("hashchange", () => {
   resetDayUi();
   state.payslipId = null;
+  state.slotEdit = null;
   state.unlockOpen = false;
   render();
 });
@@ -1372,7 +1476,7 @@ app.addEventListener("click", (e) => {
 
   const el = e.target.closest("[data-action]");
   // 명세서 창 안쪽 빈 곳을 누르면 바깥(닫기)으로 전달되지 않게
-  const insideDialog = el?.classList.contains("ps-backdrop") && e.target.closest("[data-stop]");
+  const insideDialog = el?.classList.contains("ps-backdrop") && e.target.closest("[data-stop]") && !e.target.closest("[data-action]:not(.ps-backdrop)");
   if (!el || insideDialog) {
     if (closedUnlock) render();
     return;
@@ -1485,6 +1589,21 @@ app.addEventListener("click", (e) => {
     case "schedule-pdf":
       schedulePdf(el);
       return;
+    case "edit-slot":
+      state.error = "";
+      state.slotEdit = { wd: el.dataset.wd, empId: el.dataset.id ?? null, start: Number(el.dataset.start) };
+      break;
+    case "close-slot":
+      state.slotEdit = null;
+      state.error = "";
+      break;
+    case "remove-slot": {
+      const emp = employeeById(state.slotEdit.empId);
+      if (!window.confirm(`${emp.name}님의 ${WEEKDAYS[state.slotEdit.wd]}요일 근무를 근무표에서 뺄까요?`)) return;
+      setWeekly(emp, state.slotEdit.wd, null);
+      state.slotEdit = null;
+      break;
+    }
     case "open-payslip":
       state.payslipId = id;
       break;
@@ -1530,6 +1649,11 @@ app.addEventListener("keydown", (e) => {
 });
 
 app.addEventListener("submit", (e) => {
+  if (e.target.id === "slot-form") {
+    e.preventDefault();
+    saveSlot();
+    return;
+  }
   if (e.target.id === "add-extra") {
     e.preventDefault();
     addExtra();
@@ -1567,13 +1691,11 @@ app.addEventListener("change", (e) => {
     const emp = employeeById(t.dataset.id);
     const wd = t.dataset.weekly;
     if (!t.value.trim()) {
-      delete emp.weekly[wd];
-      save();
+      setWeekly(emp, wd, null);
     } else {
       const range = parseRange(t.value);
       if (range) {
-        emp.weekly[wd] = range;
-        save();
+        setWeekly(emp, wd, range);
       } else {
         t.classList.add("invalid");
         setTimeout(() => t.classList.remove("invalid"), 1200);
