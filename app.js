@@ -3,7 +3,7 @@
 
 const TIME_ZONE = "Asia/Seoul";
 const ADMIN_PIN = "1234";
-const STORE_KEY = "alba-attendance:v2";
+const STORE_KEY = "alba-attendance:v3";
 const ADMIN_KEY = "alba-attendance:admin";
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 const MAX_VISIBLE = 3;
@@ -99,13 +99,13 @@ function sampleData() {
     for (const e of employees) {
       if (!e.days.includes(weekdayOf(date))) continue;
       const clockIn = kstIso(date, e.start);
-      records.push({ id: uid(), employeeId: e.id, date, clockIn, clockOut: kstIso(date, e.end), createdAt: clockIn });
+      records.push({ id: uid(), employeeId: e.id, date, clockIn, clockOut: scheduledEnd(e, date), createdAt: clockIn });
     }
   }
-  // 오늘 이미 출근한 직원 한 명 (근무중)
+  // 오늘 이미 출근한 직원 한 명
   const first = employees.find((e) => e.days.includes(weekdayOf(today))) ?? employees[0];
-  const startedAt = new Date(Date.now() - 2 * 3_600_000).toISOString();
-  records.push({ id: uid(), employeeId: first.id, date: today, clockIn: startedAt, clockOut: null, createdAt: startedAt });
+  const startedAt = kstIso(today, first.start);
+  records.push({ id: uid(), employeeId: first.id, date: today, clockIn: startedAt, clockOut: scheduledEnd(first, today), createdAt: startedAt });
   return { employees, records };
 }
 
@@ -134,7 +134,7 @@ function employeeById(id) {
 function recordsOn(date) {
   return store.records
     .filter((r) => r.date === date && employeeById(r.employeeId))
-    .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+    .sort((a, b) => (a.clockIn < b.clockIn ? -1 : 1));
 }
 
 function recordFor(employeeId, date) {
@@ -148,22 +148,19 @@ function scheduledOn(date) {
     .sort((a, b) => (a.start < b.start ? -1 : 1));
 }
 
+// 퇴근은 따로 누르지 않으므로, 퇴근 시각은 직원의 근무 종료 시간으로 본다 (자정을 넘기면 다음 날)
+function scheduledEnd(emp, date) {
+  return kstIso(emp.end > emp.start ? date : addDays(date, 1), emp.end);
+}
+
 function clockIn(employeeId) {
   const emp = employeeById(employeeId);
   if (!emp || !emp.active) return "직원을 찾을 수 없습니다.";
   const date = todayDateString();
   if (recordFor(employeeId, date)?.clockIn) return "이미 출근 처리되었습니다.";
   const now = new Date().toISOString();
-  store.records.push({ id: uid(), employeeId, date, clockIn: now, clockOut: null, createdAt: now });
-  save();
-  return null;
-}
-
-function clockOut(employeeId) {
-  const rec = recordFor(employeeId, todayDateString());
-  if (!rec?.clockIn) return "출근 기록이 없습니다.";
-  if (rec.clockOut) return "이미 퇴근 처리되었습니다.";
-  rec.clockOut = new Date().toISOString();
+  const end = scheduledEnd(emp, date);
+  store.records.push({ id: uid(), employeeId, date, clockIn: now, clockOut: end > now ? end : now, createdAt: now });
   save();
   return null;
 }
@@ -260,10 +257,7 @@ function renderCalendar() {
       const numClass = date === today ? "today" : isRest ? "rest" : "";
       const chips = [
         holiday ? `<span class="chip holiday">${esc(holiday)}</span>` : "",
-        ...entries.slice(0, MAX_VISIBLE).map((r) => {
-          const working = r.clockIn && !r.clockOut;
-          return `<span class="chip${working ? " working" : ""}">${esc(employeeById(r.employeeId).name)}</span>`;
-        }),
+        ...entries.slice(0, MAX_VISIBLE).map((r) => `<span class="chip">${esc(employeeById(r.employeeId).name)}</span>`),
         entries.length > MAX_VISIBLE ? `<span class="chip more">+${entries.length - MAX_VISIBLE}명</span>` : "",
       ].join("");
       return `
@@ -296,18 +290,13 @@ function renderDateBox(date, { closable }) {
   const records = recordsOn(date);
 
   const rows = records
-    .map((r) => {
-      const working = r.clockIn && !r.clockOut;
-      const hours = hoursBetween(r.clockIn, r.clockOut);
-      return `
-        <li class="in-row${working ? " working" : ""}">
-          <div class="in-top">
-            <span class="in-name">${esc(employeeById(r.employeeId).name)}</span>
-            <span class="badge${working ? " working" : ""}">${working ? "근무중" : "퇴근"}</span>
-          </div>
-          <span class="in-time">${formatTime(r.clockIn)} ~ ${working ? "" : formatTime(r.clockOut)}${hours ? ` · ${hours.toFixed(1)}h` : ""}</span>
-        </li>`;
-    })
+    .map(
+      (r) => `
+        <li class="in-row">
+          <span class="in-name">${esc(employeeById(r.employeeId).name)}</span>
+          <span class="in-time">${formatTime(r.clockIn)} 출근</span>
+        </li>`,
+    )
     .join("");
 
   return `
@@ -329,23 +318,21 @@ function renderDateBox(date, { closable }) {
 
 function renderStaffItem(emp, date, isToday) {
   const rec = recordFor(emp.id, date);
-  const expanded = state.expandedId === emp.id;
-  const status = rec?.clockOut ? "퇴근" : rec?.clockIn ? "근무중" : "";
+  const done = Boolean(rec?.clockIn);
+  const expanded = state.expandedId === emp.id && isToday && !done;
 
   let action = "";
-  if (expanded && isToday) {
-    if (!rec?.clockIn) action = `<button type="button" class="btn-primary" data-action="clock-in" data-id="${emp.id}">출근</button>`;
-    else if (!rec.clockOut) action = `<button type="button" class="btn-out" data-action="clock-out" data-id="${emp.id}">퇴근</button>`;
-    else action = `<p class="staff-done">오늘 근무를 마쳤어요 (${formatTime(rec.clockIn)} ~ ${formatTime(rec.clockOut)})</p>`;
+  if (expanded) {
+    action = `<button type="button" class="btn-primary" data-action="clock-in" data-id="${emp.id}">출근</button>`;
     if (state.error) action += `<p class="error">${esc(state.error)}</p>`;
   }
 
   return `
     <li class="staff-item${expanded ? " expanded" : ""}">
-      <button type="button" class="staff-name-btn" data-action="toggle-staff" data-id="${emp.id}"${isToday ? "" : " disabled"}>
+      <button type="button" class="staff-name-btn" data-action="toggle-staff" data-id="${emp.id}"${isToday && !done ? "" : " disabled"}>
         <span class="staff-name">${esc(emp.name)}</span>
         <span class="staff-time">${emp.start} ~ ${emp.end}</span>
-        ${status ? `<span class="badge${status === "근무중" ? " working" : ""}">${status}</span>` : ""}
+        ${done ? `<span class="badge done">출근 완료</span>` : ""}
       </button>
       ${action ? `<div class="staff-action">${action}</div>` : ""}
     </li>`;
@@ -693,10 +680,6 @@ app.addEventListener("click", (e) => {
       break;
     case "clock-in":
       state.error = clockIn(id) || "";
-      if (!state.error) state.expandedId = null;
-      break;
-    case "clock-out":
-      state.error = clockOut(id) || "";
       if (!state.error) state.expandedId = null;
       break;
     case "logout":
