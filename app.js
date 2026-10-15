@@ -749,7 +749,7 @@ function renderEmployees() {
     "employees",
     `
     <form class="toolbar" id="add-employee" style="margin-bottom:32px">
-      <div><label for="f-name">이름</label><input id="f-name" class="field" style="width:112px" required /></div>
+      <div><label for="f-name">이름</label><input id="f-name" class="field" style="width:112px" placeholder="홍길동" required /></div>
       <div><label for="f-phone">전화번호 (선택)</label><input id="f-phone" class="field phone" style="width:144px" type="text" inputmode="numeric" placeholder="010-0000-0000" /></div>
       <div><label for="f-wage">시급(원)</label><input id="f-wage" class="field money" style="width:112px" type="text" inputmode="numeric" value="${formatMoney(DEFAULT_WAGE)}" required /></div>
       <button type="submit" class="pill">추가</button>
