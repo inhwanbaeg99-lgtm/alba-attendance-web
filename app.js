@@ -385,7 +385,6 @@ function renderDateBox(date, { closable }) {
     <section class="date-box" aria-label="${m}월 ${d}일 출근 기록">
       <div class="date-box-head">
         <div>
-          <p class="date-box-month">${m}월</p>
           <p class="date-box-day${isRest ? " rest" : ""}">${d}</p>
           <p class="date-box-wd${isRest ? " rest" : ""}">${WEEKDAYS[wd]}요일${holiday ? ` · ${esc(holiday)}` : ""}</p>
         </div>
@@ -413,8 +412,8 @@ function renderStaffItem(emp, date) {
   } else if (expanded) {
     action = `
       <div class="action-row">
-        ${isToday && !done ? `<button type="button" class="btn-primary" data-action="clock-in" data-id="${emp.id}">출근</button>` : ""}
         <button type="button" class="btn-ghost" data-action="edit-shift" data-id="${emp.id}">수정</button>
+        ${isToday && !done ? `<button type="button" class="btn-primary" data-action="clock-in" data-id="${emp.id}">출근</button>` : ""}
       </div>`;
   }
   if (expanded && state.error && state.editingWhere !== "staff") action += `<p class="error">${esc(state.error)}</p>`;
