@@ -138,13 +138,23 @@ function loadStore() {
 
 let store = loadStore();
 
+// 예전 버전에서 '누른 시각'으로 저장된 출근 기록을 그날 근무 시간으로 한 번 바로잡는다
+function fixPressedTimes() {
+  if (store.timesFixed) return;
+  for (const r of store.records) {
+    const emp = employeeById(r.employeeId);
+    if (!emp) continue;
+    r.clockIn = kstIso(r.date, shiftFor(emp, r.date).start);
+    r.clockOut = scheduledEnd(emp, r.date);
+  }
+  store.timesFixed = true;
+}
+
 function save() {
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify(store));
   } catch {}
 }
-
-save();
 
 function employeeById(id) {
   return store.employees.find((e) => e.id === id);
@@ -184,6 +194,7 @@ function scheduledEnd(emp, date) {
   return endIso(date, start, end);
 }
 
+// 출근은 오늘 날짜에만 기록된다 (미래 날짜에는 출근 버튼이 나오지 않음)
 function clockIn(employeeId) {
   const emp = employeeById(employeeId);
   if (!emp || !emp.active) return "직원을 찾을 수 없습니다.";
@@ -217,6 +228,9 @@ function setAdmin(on) {
     else sessionStorage.removeItem(ADMIN_KEY);
   } catch {}
 }
+
+fixPressedTimes();
+save();
 
 // ---------- 유틸 ----------
 
