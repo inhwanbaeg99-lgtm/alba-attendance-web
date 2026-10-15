@@ -1722,26 +1722,7 @@ td.name {
   font-variant-numeric: tabular-nums;
 }
 
-.chip-time.t-short {
-  display: none;
-}
-
-.card.open .chip-time.t-long {
-  display: none;
-}
-
-.card.open .chip-time.t-short {
-  display: inline;
-}
-
-/* 달력이 반으로 줄었을 때: 이름+시간이 칸에 들어가도록 조금 작게 */
-.card.open .entries .chip {
-  padding: 0 1px;
-  font-size: 11px;
-  letter-spacing: -0.03em;
-}
-
+/* 날짜를 눌러 달력이 반으로 줄면 이름만 */
 .card.open .chip-time {
-  font-size: 10px;
-  letter-spacing: -0.04em;
+  display: none;
 }

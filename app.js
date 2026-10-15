@@ -61,12 +61,6 @@ function formatTime(iso) {
   }).format(new Date(iso));
 }
 
-// 달력 칸이 좁을 때: "07:00" → "7", "22:30" → "22:30"
-function shortTime(iso) {
-  const [h, m] = formatTime(iso).split(":");
-  return m === "00" ? String(Number(h)) : `${Number(h)}:${m}`;
-}
-
 function hoursBetween(start, end) {
   if (!start || !end) return 0;
   return Math.max(0, (new Date(end) - new Date(start)) / 3_600_000);
@@ -483,7 +477,7 @@ function renderCalendar() {
       const chips = [
         ...entries.slice(0, MAX_VISIBLE).map(
           (r) =>
-            `<span class="chip">${esc(employeeById(r.employeeId).name)} <span class="chip-time t-long">${formatTime(r.clockIn)}~${formatTime(r.clockOut)}</span><span class="chip-time t-short">${shortTime(r.clockIn)}-${shortTime(r.clockOut)}</span></span>`,
+            `<span class="chip">${esc(employeeById(r.employeeId).name)} <span class="chip-time">${formatTime(r.clockIn)}~${formatTime(r.clockOut)}</span></span>`,
         ),
         entries.length > MAX_VISIBLE ? `<span class="chip more">+${entries.length - MAX_VISIBLE}명</span>` : "",
       ].join("");
