@@ -390,8 +390,8 @@ function renderHome() {
       <div class="home-inner">
         ${renderUnlock()}
         <div class="card${open ? " open" : ""}" id="card">
-          <div class="day-area">${sel ? renderDayArea(sel, { closable: true }) : ""}</div>
           <div class="cal-wrap">${renderCalendar()}</div>
+          <div class="day-area">${sel ? renderDayArea(sel, { closable: true }) : ""}</div>
         </div>
       </div>
     </div>
