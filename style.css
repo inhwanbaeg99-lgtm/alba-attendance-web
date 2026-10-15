@@ -7,10 +7,10 @@
   --accent: #3182f6;
   --accent-soft: #3182f61a;
   --red: #ef4444;
-  --card-w: min(1480px, calc(100vw - 48px));
+  --card-w: min(1560px, calc(100vw - 32px));
   /* 달력 한 칸 높이: 화면 높이에 맞춰 달력 전체가 한 화면에 들어오도록 */
   /* 최소 높이: 날짜 + 이름 4줄이 잘리지 않는 높이 */
-  --cell-h: clamp(6rem, calc((100vh - 268px) / 6), 10rem);
+  --cell-h: clamp(6.25rem, calc((100vh - 244px) / 6), 10.5rem);
   color-scheme: light;
 }
 
