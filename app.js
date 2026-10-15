@@ -115,18 +115,26 @@ function initialData() {
     active: true,
     weekly: Object.fromEntries(Object.entries(days).map(([wd, range]) => [wd, parseRange(range)])),
   }));
-  // 이번 달 1일부터 어제까지는 근무표대로 출근한 것으로 채워 둔다
-  const records = [];
-  const today = todayDateString();
-  for (let date = `${today.slice(0, 7)}-01`; date < today; date = addDays(date, 1)) {
-    for (const e of employees) {
+  const data = { employees, records: [], shifts: {}, filledFrom: FILL_FROM };
+  fillSchedule(data, FILL_FROM, todayDateString());
+  return data;
+}
+
+// 9월 첫 주(8/31 월요일)부터 어제까지는 근무표대로 출근한 것으로 채운다.
+// 9/1 이 화요일이라, 그 주 주휴수당 계산을 위해 8/31 도 포함.
+const FILL_FROM = "2026-08-31";
+
+// from 이상 to 미만 날짜에, 근무표상 근무일인데 기록이 없으면 근무표 시간으로 기록을 넣는다
+function fillSchedule(data, from, to) {
+  const has = new Set(data.records.map((r) => `${r.employeeId}|${r.date}`));
+  for (let date = from; date < to; date = addDays(date, 1)) {
+    for (const e of data.employees) {
       const shift = e.weekly[weekdayOf(date)];
-      if (!shift) continue;
+      if (!shift || has.has(`${e.id}|${date}`)) continue;
       const clockIn = kstIso(date, shift.start);
-      records.push({ id: uid(), employeeId: e.id, date, clockIn, clockOut: endIso(date, shift.start, shift.end), createdAt: clockIn });
+      data.records.push({ id: uid(), employeeId: e.id, date, clockIn, clockOut: endIso(date, shift.start, shift.end), createdAt: clockIn });
     }
   }
-  return { employees, records, shifts: {} };
 }
 
 function loadStore() {
@@ -231,6 +239,12 @@ function setAdmin(on) {
 }
 
 fixPressedTimes();
+// 이미 저장된 데이터에 9월(8/31~) 기록이 없으면 한 번 채운다
+if (!store.filledFrom || store.filledFrom > FILL_FROM) {
+  const firstExisting = store.records.reduce((min, r) => (r.date < min ? r.date : min), todayDateString());
+  fillSchedule(store, FILL_FROM, firstExisting);
+  store.filledFrom = FILL_FROM;
+}
 save();
 
 // ---------- 유틸 ----------
