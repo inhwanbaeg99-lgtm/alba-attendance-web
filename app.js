@@ -3,11 +3,12 @@
 
 const TIME_ZONE = "Asia/Seoul";
 const ADMIN_PIN = "1234";
-const STORE_KEY = "alba-attendance:v1";
+const STORE_KEY = "alba-attendance:v2";
 const ADMIN_KEY = "alba-attendance:admin";
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 const MAX_VISIBLE = 3;
 const PIN_LENGTH = 4;
+const PANEL_ANIM_MS = 320;
 
 // 2026년 대한민국 법정공휴일 (대체공휴일 포함)
 const HOLIDAYS = {
@@ -55,6 +56,7 @@ function formatTime(iso) {
     timeZone: TIME_ZONE,
     hour: "2-digit",
     minute: "2-digit",
+    hour12: false,
   }).format(new Date(iso));
 }
 
@@ -63,25 +65,19 @@ function hoursBetween(start, end) {
   return Math.max(0, (new Date(end) - new Date(start)) / 3_600_000);
 }
 
-function formatDateHeading(dateStr) {
+function weekdayOf(dateStr) {
   const [y, m, d] = dateStr.split("-").map(Number);
-  return new Intl.DateTimeFormat("ko-KR", {
-    timeZone: TIME_ZONE,
-    month: "long",
-    day: "numeric",
-    weekday: "short",
-  }).format(new Date(Date.UTC(y, m - 1, d, 3)));
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
 }
 
-// 해당 날짜(KST)의 hh:mm 시각을 ISO 문자열로
-function kstIso(dateStr, hh, mm) {
-  return new Date(`${dateStr}T${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:00+09:00`).toISOString();
+// 해당 날짜(KST)의 "HH:MM" 시각을 ISO 문자열로
+function kstIso(dateStr, hhmm) {
+  return new Date(`${dateStr}T${hhmm}:00+09:00`).toISOString();
 }
 
 function addDays(dateStr, n) {
   const [y, m, d] = dateStr.split("-").map(Number);
-  const t = new Date(Date.UTC(y, m - 1, d + n));
-  return t.toISOString().slice(0, 10);
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
 }
 
 // ---------- 저장소 ----------
@@ -92,34 +88,24 @@ function uid() {
 
 function sampleData() {
   const employees = [
-    { id: uid(), name: "김민수", phone: "01012345678", hourlyWage: 10030, active: true },
-    { id: uid(), name: "이서연", phone: null, hourlyWage: 10030, active: true },
-    { id: uid(), name: "박지훈", phone: null, hourlyWage: 10500, active: true },
+    { id: uid(), name: "김민수", phone: "01012345678", hourlyWage: 10030, active: true, start: "09:00", end: "15:00", days: [1, 2, 3, 4, 5] },
+    { id: uid(), name: "이서연", phone: null, hourlyWage: 10030, active: true, start: "15:00", end: "21:30", days: [0, 3, 4, 5, 6] },
+    { id: uid(), name: "박지훈", phone: null, hourlyWage: 10500, active: true, start: "10:00", end: "16:00", days: [0, 1, 2, 6] },
   ];
   const today = todayDateString();
   const records = [];
-  const shifts = [
-    [0, 9, 0, 15, 0],
-    [1, 15, 0, 21, 30],
-    [2, 10, 0, 16, 0],
-  ];
-  for (let back = 1; back <= 12; back++) {
+  for (let back = 1; back <= 14; back++) {
     const date = addDays(today, -back);
-    shifts.forEach(([idx, ih, im, oh, om], i) => {
-      if ((back + i) % 3 === 0) return; // 쉬는 날
-      records.push({
-        id: uid(),
-        employeeId: employees[idx].id,
-        date,
-        clockIn: kstIso(date, ih, im),
-        clockOut: kstIso(date, oh, om),
-        createdAt: kstIso(date, ih, im),
-      });
-    });
+    for (const e of employees) {
+      if (!e.days.includes(weekdayOf(date))) continue;
+      const clockIn = kstIso(date, e.start);
+      records.push({ id: uid(), employeeId: e.id, date, clockIn, clockOut: kstIso(date, e.end), createdAt: clockIn });
+    }
   }
-  // 오늘 근무중인 직원 한 명
+  // 오늘 이미 출근한 직원 한 명 (근무중)
+  const first = employees.find((e) => e.days.includes(weekdayOf(today))) ?? employees[0];
   const startedAt = new Date(Date.now() - 2 * 3_600_000).toISOString();
-  records.push({ id: uid(), employeeId: employees[0].id, date: today, clockIn: startedAt, clockOut: null, createdAt: startedAt });
+  records.push({ id: uid(), employeeId: first.id, date: today, clockIn: startedAt, clockOut: null, createdAt: startedAt });
   return { employees, records };
 }
 
@@ -151,13 +137,22 @@ function recordsOn(date) {
     .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
 }
 
+function recordFor(employeeId, date) {
+  return store.records.find((r) => r.employeeId === employeeId && r.date === date);
+}
+
+function scheduledOn(date) {
+  const wd = weekdayOf(date);
+  return store.employees
+    .filter((e) => e.active && e.days.includes(wd))
+    .sort((a, b) => (a.start < b.start ? -1 : 1));
+}
+
 function clockIn(employeeId) {
   const emp = employeeById(employeeId);
   if (!emp || !emp.active) return "직원을 찾을 수 없습니다.";
   const date = todayDateString();
-  if (store.records.some((r) => r.employeeId === employeeId && r.date === date && r.clockIn)) {
-    return "이미 출근 처리되었습니다.";
-  }
+  if (recordFor(employeeId, date)?.clockIn) return "이미 출근 처리되었습니다.";
   const now = new Date().toISOString();
   store.records.push({ id: uid(), employeeId, date, clockIn: now, clockOut: null, createdAt: now });
   save();
@@ -165,8 +160,7 @@ function clockIn(employeeId) {
 }
 
 function clockOut(employeeId) {
-  const date = todayDateString();
-  const rec = store.records.find((r) => r.employeeId === employeeId && r.date === date);
+  const rec = recordFor(employeeId, todayDateString());
   if (!rec?.clockIn) return "출근 기록이 없습니다.";
   if (rec.clockOut) return "이미 퇴근 처리되었습니다.";
   rec.clockOut = new Date().toISOString();
@@ -204,9 +198,11 @@ const state = {
   year: 0,
   month: 0,
   selectedDate: null,
+  animateOpen: false,
+  expandedId: null, // 이름을 눌러 출근/퇴근 버튼이 펼쳐진 직원
+  showOthers: false, // 근무 예정이 아닌 직원 목록 펼침
   unlockOpen: false,
   pin: "",
-  sheet: null, // { type: "picker" | "detail", date, recordId }
   error: "",
   records: { from: "", to: "", employeeId: "" },
 };
@@ -253,6 +249,7 @@ function renderCalendar() {
   for (let d = 1; d <= daysInMonth; d++) {
     cells.push(`${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`);
   }
+  while (cells.length % 7) cells.push(null);
 
   const body = cells
     .map((date, i) => {
@@ -267,7 +264,7 @@ function renderCalendar() {
           const working = r.clockIn && !r.clockOut;
           return `<span class="chip${working ? " working" : ""}">${esc(employeeById(r.employeeId).name)}</span>`;
         }),
-        entries.length > MAX_VISIBLE ? `<span class="chip more">+${entries.length - MAX_VISIBLE}명 더보기</span>` : "",
+        entries.length > MAX_VISIBLE ? `<span class="chip more">+${entries.length - MAX_VISIBLE}명</span>` : "",
       ].join("");
       return `
         <button type="button" class="cell${date === selectedDate ? " selected" : ""}" data-date="${date}">
@@ -285,86 +282,100 @@ function renderCalendar() {
       <button type="button" class="round-btn" data-action="next-month" aria-label="다음 달">›</button>
     </div>
     <div class="grid">
-      ${WEEKDAYS.map((w) => `<div class="weekday">${w}</div>`).join("")}
+      ${WEEKDAYS.map((w, i) => `<div class="weekday${i === 0 ? " rest" : ""}">${w}</div>`).join("")}
       ${body}
     </div>`;
 }
 
-function renderDayPanel(date, { closable }) {
+// 날짜 박스: 그날 출근한 사람들
+function renderDateBox(date, { closable }) {
+  const [, m, d] = date.split("-").map(Number);
+  const wd = weekdayOf(date);
+  const holiday = HOLIDAYS[date];
+  const isRest = wd === 0 || Boolean(holiday);
   const records = recordsOn(date);
-  const isToday = date === todayDateString();
+
   const rows = records
     .map((r) => {
       const working = r.clockIn && !r.clockOut;
+      const hours = hoursBetween(r.clockIn, r.clockOut);
       return `
-        <button type="button" class="row" data-action="detail" data-id="${r.id}">
-          <div>
-            <p class="row-name">${esc(employeeById(r.employeeId).name)}</p>
-            <p class="sub">${formatTime(r.clockIn)} ~ ${formatTime(r.clockOut)}</p>
+        <li class="in-row${working ? " working" : ""}">
+          <div class="in-top">
+            <span class="in-name">${esc(employeeById(r.employeeId).name)}</span>
+            <span class="badge${working ? " working" : ""}">${working ? "근무중" : "퇴근"}</span>
           </div>
-          <span class="badge${working ? " working" : ""}">${working ? "근무중" : "퇴근"}</span>
-        </button>`;
+          <span class="in-time">${formatTime(r.clockIn)} ~ ${working ? "" : formatTime(r.clockOut)}${hours ? ` · ${hours.toFixed(1)}h` : ""}</span>
+        </li>`;
     })
     .join("");
 
   return `
-    <div class="panel">
-      <div class="panel-head">
+    <section class="date-box" aria-label="${m}월 ${d}일 출근 기록">
+      <div class="date-box-head">
         <div>
-          <p class="panel-title">${formatDateHeading(date)}</p>
-          <p class="sub">${records.length}명 근무</p>
+          <p class="date-box-month">${m}월</p>
+          <p class="date-box-day${isRest ? " rest" : ""}">${d}</p>
+          <p class="date-box-wd${isRest ? " rest" : ""}">${WEEKDAYS[wd]}요일${holiday ? ` · ${esc(holiday)}` : ""}</p>
         </div>
         ${closable ? `<button type="button" class="close-btn" data-action="close-panel" aria-label="닫기">×</button>` : ""}
       </div>
-      <div class="list">
-        ${rows || `<div class="empty">근무 기록이 없습니다.</div>`}
-      </div>
-      ${isToday ? `<button type="button" class="btn-primary mt" data-action="open-picker">+ 출근 추가</button>` : ""}
-    </div>`;
+      <p class="box-label">출근 ${records.length}명</p>
+      <ul class="in-list">
+        ${rows || `<li class="in-empty">아직 출근한 사람이 없어요</li>`}
+      </ul>
+    </section>`;
 }
 
-function renderSheet() {
-  const s = state.sheet;
-  if (!s) return "";
-  const err = state.error ? `<p class="error">${esc(state.error)}</p>` : "";
+function renderStaffItem(emp, date, isToday) {
+  const rec = recordFor(emp.id, date);
+  const expanded = state.expandedId === emp.id;
+  const status = rec?.clockOut ? "퇴근" : rec?.clockIn ? "근무중" : "";
 
-  if (s.type === "picker") {
-    const date = todayDateString();
-    const clockedIn = new Set(store.records.filter((r) => r.date === date && r.clockIn).map((r) => r.employeeId));
-    const available = store.employees.filter((e) => e.active && !clockedIn.has(e.id));
-    return `
-      <div class="sheet-backdrop" data-action="close-sheet">
-        <div class="sheet" data-stop>
-          <p class="sheet-title">출근할 직원 선택</p>
-          ${err}
-          <div class="pick">
-            ${available.map((e) => `<button type="button" data-action="clock-in" data-id="${e.id}">${esc(e.name)}</button>`).join("")}
-            ${available.length ? "" : `<p class="empty" style="padding:16px 0">출근 가능한 직원이 없습니다.</p>`}
-          </div>
-        </div>
-      </div>`;
+  let action = "";
+  if (expanded && isToday) {
+    if (!rec?.clockIn) action = `<button type="button" class="btn-primary" data-action="clock-in" data-id="${emp.id}">출근</button>`;
+    else if (!rec.clockOut) action = `<button type="button" class="btn-out" data-action="clock-out" data-id="${emp.id}">퇴근</button>`;
+    else action = `<p class="staff-done">오늘 근무를 마쳤어요 (${formatTime(rec.clockIn)} ~ ${formatTime(rec.clockOut)})</p>`;
+    if (state.error) action += `<p class="error">${esc(state.error)}</p>`;
   }
 
-  const r = store.records.find((x) => x.id === s.recordId);
-  if (!r) return "";
-  const isToday = r.date === todayDateString();
   return `
-    <div class="sheet-backdrop" data-action="close-sheet">
-      <div class="sheet" data-stop>
-        <p class="sheet-title" style="margin-bottom:16px">${esc(employeeById(r.employeeId).name)}</p>
-        <div class="detail">
-          <div><span>출근</span><span>${formatTime(r.clockIn)}</span></div>
-          <div><span>퇴근</span><span>${formatTime(r.clockOut)}</span></div>
-          ${r.clockOut ? `<div class="total"><span>근무 시간</span><span>${hoursBetween(r.clockIn, r.clockOut).toFixed(1)}시간</span></div>` : ""}
-        </div>
-        ${err}
-        ${
-          isToday && !r.clockOut
-            ? `<button type="button" class="btn-primary" style="padding:12px 0" data-action="clock-out" data-id="${r.employeeId}">퇴근하기</button>`
-            : `<button type="button" class="btn-secondary" data-action="close-sheet">닫기</button>`
-        }
-      </div>
-    </div>`;
+    <li class="staff-item${expanded ? " expanded" : ""}">
+      <button type="button" class="staff-name-btn" data-action="toggle-staff" data-id="${emp.id}"${isToday ? "" : " disabled"}>
+        <span class="staff-name">${esc(emp.name)}</span>
+        <span class="staff-time">${emp.start} ~ ${emp.end}</span>
+        ${status ? `<span class="badge${status === "근무중" ? " working" : ""}">${status}</span>` : ""}
+      </button>
+      ${action ? `<div class="staff-action">${action}</div>` : ""}
+    </li>`;
+}
+
+// 근무자 목록: 그날 근무 예정인 직원과 시간
+function renderStaff(date) {
+  const isToday = date === todayDateString();
+  const scheduled = scheduledOn(date);
+  const scheduledIds = new Set(scheduled.map((e) => e.id));
+  const others = store.employees.filter((e) => e.active && !scheduledIds.has(e.id));
+
+  return `
+    <section class="staff" aria-label="근무자">
+      <p class="staff-title">${isToday ? "오늘 근무자" : "근무 예정"}</p>
+      <p class="sub">${isToday ? "본인 이름을 눌러 출근하세요" : "출퇴근은 오늘 날짜에서만 할 수 있어요"}</p>
+      <ul class="staff-list">
+        ${scheduled.map((e) => renderStaffItem(e, date, isToday)).join("") || `<li class="in-empty">근무 예정인 직원이 없어요</li>`}
+      </ul>
+      ${
+        isToday && others.length
+          ? `<button type="button" class="others-toggle" data-action="toggle-others">${state.showOthers ? "다른 직원 숨기기" : `다른 직원 (${others.length})`}</button>
+             ${state.showOthers ? `<ul class="staff-list">${others.map((e) => renderStaffItem(e, date, isToday)).join("")}</ul>` : ""}`
+          : ""
+      }
+    </section>`;
+}
+
+function renderDayArea(date, { closable }) {
+  return `<div class="day-area-inner">${renderDateBox(date, { closable })}${renderStaff(date)}</div>`;
 }
 
 function demoNote() {
@@ -373,29 +384,28 @@ function demoNote() {
 
 function renderHome() {
   const sel = state.selectedDate;
+  const open = sel && !state.animateOpen;
   return `
     <div class="home">
       <div class="home-inner">
         ${renderUnlock()}
-        <div class="card">
+        <div class="card${open ? " open" : ""}" id="card">
+          <div class="day-area">${sel ? renderDayArea(sel, { closable: true }) : ""}</div>
           <div class="cal-wrap">${renderCalendar()}</div>
-          ${sel ? `<div class="side">${renderDayPanel(sel, { closable: true })}</div>` : ""}
         </div>
       </div>
     </div>
-    ${demoNote()}
-    ${renderSheet()}`;
+    ${demoNote()}`;
 }
 
 function renderDayPage(date) {
   return `
     <div class="day-page">
       <div class="day-page-inner">
-        <button type="button" class="round-btn" data-action="go-home" aria-label="달력으로 돌아가기">‹</button>
-        <div class="box">${renderDayPanel(date, { closable: false })}</div>
+        <button type="button" class="round-btn back-btn" data-action="go-home" aria-label="달력으로 돌아가기">‹</button>
+        ${renderDayArea(date, { closable: false })}
       </div>
-    </div>
-    ${renderSheet()}`;
+    </div>`;
 }
 
 // ---------- 화면: 관리자 ----------
@@ -417,14 +427,30 @@ function renderAdminShell(active, content) {
     <main class="admin-main">${content}</main>`;
 }
 
+function dayToggles(days, empId) {
+  return `<div class="day-toggles">${WEEKDAYS.map(
+    (w, i) =>
+      `<button type="button" class="day-toggle${days.includes(i) ? " on" : ""}" ${
+        empId ? `data-action="toggle-day" data-id="${empId}"` : `data-action="toggle-new-day"`
+      } data-day="${i}" aria-pressed="${days.includes(i)}">${w}</button>`,
+  ).join("")}</div>`;
+}
+
+let newEmployeeDays = [1, 2, 3, 4, 5];
+
 function renderEmployees() {
   const rows = store.employees
     .map(
       (e) => `
       <tr>
-        <td class="name">${esc(e.name)}</td>
-        <td class="muted">${esc(e.phone || "-")}</td>
-        <td><input class="field" style="width:96px;padding:4px 8px" type="number" value="${e.hourlyWage}" data-wage="${e.id}" /></td>
+        <td class="name">${esc(e.name)}<div class="muted small">${esc(e.phone || "")}</div></td>
+        <td>${dayToggles(e.days, e.id)}</td>
+        <td class="time-cell">
+          <input class="field time" type="time" value="${e.start}" data-time="start" data-id="${e.id}" aria-label="${esc(e.name)} 시작 시간" />
+          ~
+          <input class="field time" type="time" value="${e.end}" data-time="end" data-id="${e.id}" aria-label="${esc(e.name)} 종료 시간" />
+        </td>
+        <td><input class="field" style="width:96px;padding:4px 8px" type="number" value="${e.hourlyWage}" data-wage="${e.id}" aria-label="${esc(e.name)} 시급" /></td>
         <td><button type="button" class="status${e.active ? " on" : ""}" data-action="toggle-active" data-id="${e.id}">${e.active ? "재직중" : "비활성"}</button></td>
         <td><button type="button" class="danger" data-action="remove-employee" data-id="${e.id}">삭제</button></td>
       </tr>`,
@@ -438,13 +464,19 @@ function renderEmployees() {
     <form class="toolbar" id="add-employee" style="margin-bottom:32px">
       <div><label for="f-name">이름</label><input id="f-name" class="field" style="width:112px" required /></div>
       <div><label for="f-phone">전화번호 (선택)</label><input id="f-phone" class="field" style="width:144px" placeholder="01012345678" /></div>
+      <div><label>근무 요일</label>${dayToggles(newEmployeeDays)}</div>
+      <div>
+        <label for="f-start">근무 시간</label>
+        <input id="f-start" class="field time" type="time" value="09:00" required /> ~
+        <input id="f-end" class="field time" type="time" value="18:00" required aria-label="종료 시간" />
+      </div>
       <div><label for="f-wage">시급(원)</label><input id="f-wage" class="field" style="width:112px" type="number" value="10030" required /></div>
       <button type="submit" class="pill">추가</button>
     </form>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>이름</th><th>전화번호</th><th>시급</th><th>상태</th><th>관리</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="5" class="empty">등록된 직원이 없습니다.</td></tr>`}</tbody>
+        <thead><tr><th>이름</th><th>근무 요일</th><th>근무 시간</th><th>시급</th><th>상태</th><th>관리</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="6" class="empty">등록된 직원이 없습니다.</td></tr>`}</tbody>
       </table>
     </div>`,
   );
@@ -529,19 +561,29 @@ function render() {
   else if (r.name === "records") app.innerHTML = renderRecords();
   else app.innerHTML = renderHome();
 
+  // 처음 날짜를 눌렀을 때 달력이 줄어드는 애니메이션
+  if (state.animateOpen) {
+    state.animateOpen = false;
+    const card = document.getElementById("card");
+    if (card) {
+      card.getBoundingClientRect();
+      requestAnimationFrame(() => card.classList.add("open"));
+    }
+  }
+
   if (state.unlockOpen) document.getElementById("pin-input")?.focus();
 }
 
 function navigate(hash) {
-  state.sheet = null;
   state.error = "";
   if (location.hash === hash) render();
   else location.hash = hash;
 }
 
 window.addEventListener("hashchange", () => {
-  state.sheet = null;
   state.error = "";
+  state.expandedId = null;
+  state.showOthers = false;
   state.unlockOpen = false;
   state.pin = "";
   render();
@@ -574,9 +616,27 @@ function enterKey(key) {
 
 // ---------- 이벤트 ----------
 
-function currentDayDate() {
-  const r = route();
-  return r.name === "day" ? r.date : state.selectedDate;
+function selectDate(date) {
+  state.error = "";
+  state.expandedId = null;
+  state.showOthers = false;
+  if (!isDesktop()) {
+    navigate(`#/day/${date}`);
+    return;
+  }
+  state.animateOpen = !state.selectedDate;
+  state.selectedDate = date;
+  render();
+}
+
+function closePanel() {
+  const card = document.getElementById("card");
+  card?.classList.remove("open");
+  setTimeout(() => {
+    state.selectedDate = null;
+    state.expandedId = null;
+    render();
+  }, PANEL_ANIM_MS);
 }
 
 app.addEventListener("click", (e) => {
@@ -595,19 +655,12 @@ app.addEventListener("click", (e) => {
 
   const cell = e.target.closest("[data-date]");
   if (cell) {
-    if (isDesktop()) {
-      state.selectedDate = cell.dataset.date;
-      render();
-    } else {
-      navigate(`#/day/${cell.dataset.date}`);
-    }
+    selectDate(cell.dataset.date);
     return;
   }
 
   const el = e.target.closest("[data-action]");
-  // 시트 안쪽을 누른 경우 바깥(backdrop)의 닫기 동작은 무시
-  const insideSheet = el?.classList.contains("sheet-backdrop") && e.target.closest("[data-stop]");
-  if (!el || insideSheet) {
+  if (!el) {
     if (closedUnlock) render();
     return;
   }
@@ -626,29 +679,25 @@ app.addEventListener("click", (e) => {
       break;
     }
     case "close-panel":
-      state.selectedDate = null;
-      break;
+      closePanel();
+      return;
     case "go-home":
       navigate("#/");
       return;
-    case "detail":
+    case "toggle-staff":
       state.error = "";
-      state.sheet = { type: "detail", recordId: id };
+      state.expandedId = state.expandedId === id ? null : id;
       break;
-    case "open-picker":
-      state.error = "";
-      state.sheet = { type: "picker", date: currentDayDate() };
-      break;
-    case "close-sheet":
-      state.sheet = null;
+    case "toggle-others":
+      state.showOthers = !state.showOthers;
       break;
     case "clock-in":
       state.error = clockIn(id) || "";
-      if (!state.error) state.sheet = null;
+      if (!state.error) state.expandedId = null;
       break;
     case "clock-out":
       state.error = clockOut(id) || "";
-      if (!state.error) state.sheet = null;
+      if (!state.error) state.expandedId = null;
       break;
     case "logout":
       setAdmin(false);
@@ -658,6 +707,23 @@ app.addEventListener("click", (e) => {
       const emp = employeeById(id);
       emp.active = !emp.active;
       save();
+      break;
+    }
+    case "toggle-day":
+    case "toggle-new-day": {
+      const day = Number(el.dataset.day);
+      const flip = (days) => (days.includes(day) ? days.filter((x) => x !== day) : [...days, day].sort());
+      if (action === "toggle-day") {
+        const emp = employeeById(id);
+        emp.days = flip(emp.days);
+        save();
+      } else {
+        newEmployeeDays = flip(newEmployeeDays);
+        // 입력 중인 값이 지워지지 않도록 버튼만 갱신
+        el.classList.toggle("on");
+        el.setAttribute("aria-pressed", String(newEmployeeDays.includes(day)));
+        return;
+      }
       break;
     }
     case "remove-employee": {
@@ -676,6 +742,7 @@ app.addEventListener("click", (e) => {
       store = sampleData();
       save();
       state.selectedDate = null;
+      state.expandedId = null;
       break;
     default:
       return;
@@ -711,25 +778,41 @@ app.addEventListener("submit", (e) => {
   const name = document.getElementById("f-name").value.trim();
   const phone = document.getElementById("f-phone").value.trim();
   const wage = Number(document.getElementById("f-wage").value);
+  const start = document.getElementById("f-start").value || "09:00";
+  const end = document.getElementById("f-end").value || "18:00";
   if (!name) return;
-  store.employees.push({ id: uid(), name, phone: phone || null, hourlyWage: Number.isFinite(wage) ? wage : 0, active: true });
+  store.employees.push({
+    id: uid(),
+    name,
+    phone: phone || null,
+    hourlyWage: Number.isFinite(wage) ? wage : 0,
+    active: true,
+    start,
+    end,
+    days: [...newEmployeeDays],
+  });
   save();
   render();
 });
 
 app.addEventListener("change", (e) => {
-  const wageId = e.target.dataset.wage;
-  if (wageId) {
-    const wage = Number(e.target.value);
+  const t = e.target;
+  if (t.dataset.wage) {
+    const wage = Number(t.value);
     if (Number.isFinite(wage)) {
-      employeeById(wageId).hourlyWage = wage;
+      employeeById(t.dataset.wage).hourlyWage = wage;
       save();
     }
     return;
   }
-  const filter = e.target.dataset.filter;
+  if (t.dataset.time && t.value) {
+    employeeById(t.dataset.id)[t.dataset.time] = t.value;
+    save();
+    return;
+  }
+  const filter = t.dataset.filter;
   if (filter) {
-    state.records[filter] = e.target.value;
+    state.records[filter] = t.value;
     render();
   }
 });
@@ -748,12 +831,16 @@ function exportCsv() {
   URL.revokeObjectURL(url);
 }
 
-// 화면 크기가 바뀌어 모바일 날짜 페이지가 데스크탑이 되면 홈 패널로 전환
+// 화면이 넓어지면 모바일 날짜 페이지를 홈 패널로, 좁아지면 그 반대로 전환
 window.matchMedia("(min-width: 768px)").addEventListener("change", (mq) => {
   const r = route();
   if (mq.matches && r.name === "day") {
     state.selectedDate = r.date;
     navigate("#/");
+  } else if (!mq.matches && r.name === "home" && state.selectedDate) {
+    const date = state.selectedDate;
+    state.selectedDate = null;
+    navigate(`#/day/${date}`);
   }
 });
 
