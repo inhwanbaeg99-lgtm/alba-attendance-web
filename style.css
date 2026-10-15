@@ -7,6 +7,7 @@
   --accent: #3182f6;
   --accent-soft: #3182f61a;
   --red: #ef4444;
+  --grid: #b9c2cc;
   --card-w: min(1560px, calc(100vw - 32px));
   /* 달력 한 칸 높이: 화면 높이에 맞춰 달력 전체가 한 화면에 들어오도록 */
   /* 최소 높이: 날짜 + 이름 4줄이 잘리지 않는 높이 */
@@ -23,6 +24,7 @@
     --line: #37342e;
     --accent: #5b9bf8;
     --accent-soft: #5b9bf826;
+    --grid: #4f4a42;
     color-scheme: dark;
   }
 }
@@ -1039,9 +1041,18 @@ td.name {
   font-size: 12px;
 }
 
+.ts-wrap {
+  border-radius: 0;
+  background: none;
+}
+
+.timesheet {
+  border: 1px solid var(--grid);
+}
+
 .timesheet th,
 .timesheet td {
-  border: 1px solid var(--line);
+  border: 1px solid var(--grid);
   padding: 6px 2px;
   text-align: center;
   white-space: nowrap;
@@ -1051,6 +1062,11 @@ td.name {
 .timesheet th {
   font-weight: 700;
   color: var(--ink);
+  background: var(--paper);
+}
+
+.timesheet th.weekend {
+  background: color-mix(in srgb, var(--accent) 18%, var(--paper));
 }
 
 .timesheet .ts-day {
@@ -1252,4 +1268,137 @@ td.name {
   text-align: center;
   font-size: 26px;
   font-weight: 500;
+}
+
+/* ---------- 직원 관리: 근무표 색 ---------- */
+.name-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.swatch {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--grid);
+  border-radius: 4px;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.swatch::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.swatch::-webkit-color-swatch {
+  border: 0;
+  border-radius: 3px;
+}
+
+/* ---------- 근무표 (게시용, 사진 양식) ---------- */
+.sched-bar {
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sched-bar .hint {
+  margin: 0;
+}
+
+.sched-scroll {
+  overflow-x: auto;
+}
+
+/* 종이 느낌: 화면 테마와 상관없이 흰 바탕 */
+.sched-sheet {
+  min-width: 1000px;
+  background: #ffffff;
+  color: #111111;
+  padding: 12px 0 0;
+  font-family: "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", -apple-system, sans-serif;
+}
+
+.sc-title {
+  margin: 0 0 12px;
+  text-align: center;
+  font-size: 26px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: #111111;
+}
+
+.sc-period {
+  width: auto;
+  border: 0;
+  border-bottom: 1px dashed #bbbbbb;
+  background: none;
+  font: inherit;
+  text-align: center;
+  color: inherit;
+  outline: none;
+}
+
+.sched {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 15px;
+  letter-spacing: 0.08em;
+}
+
+.sched th,
+.sched td {
+  height: 34px;
+  border: 1px solid #333333;
+  padding: 0 4px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.sched th {
+  height: 40px;
+  background: #f2f2f2;
+  font-weight: 500;
+  font-size: 16px;
+}
+
+.sched th.sc-rest {
+  color: #e00000;
+}
+
+.sc-time {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+/* 빈 칸: 사선 */
+.sc-empty {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none'%3E%3Cline x1='0' y1='100' x2='100' y2='0' stroke='%23555' stroke-width='1' vector-effect='non-scaling-stroke'/%3E%3C/svg%3E");
+  background-size: 100% 100%;
+}
+
+.sc-foot td {
+  height: 36px;
+  background: #f2f2f2;
+  letter-spacing: 0.3em;
+}
+
+.sc-note input {
+  width: 100%;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: center;
+  letter-spacing: 0;
+  color: inherit;
+  outline: none;
+}
+
+.sched-sheet.capturing .sc-period {
+  border-bottom-color: transparent;
 }

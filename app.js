@@ -93,17 +93,43 @@ function uid() {
 }
 
 // 요일별 근무표 (0=일 … 6=토). 같은 사람도 요일마다 시간이 다를 수 있다.
+// 순서 = 근무표에서 같은 시각에 시작할 때 왼쪽 칸에 들어가는 순서
 const INITIAL_SCHEDULE = [
   ["배예빈", { 1: "07:00~12:00", 2: "07:00~12:00", 3: "07:00~15:00", 4: "07:00~12:00", 6: "10:00~15:00" }],
+  ["김예린", { 2: "12:00~18:00", 3: "12:00~18:00", 5: "07:00~12:00" }],
   ["백인환", { 1: "12:00~18:00", 3: "15:00~22:30", 4: "15:00~23:00", 5: "12:00~18:00" }],
+  ["손민영", { 4: "12:00~18:00" }],
+  ["최수빈", { 2: "18:00~22:30", 6: "10:00~18:00", 0: "10:00~15:00" }],
+  ["최광효", { 5: "18:00~23:00", 6: "18:00~23:00", 0: "16:00~22:30" }],
   ["이시헌", { 1: "18:00~22:30", 5: "18:00~23:00", 6: "15:00~23:00", 0: "15:00~22:30" }],
   ["정현욱", { 1: "18:00~22:30", 2: "18:00~22:30", 4: "18:00~23:00" }],
-  ["김예린", { 2: "12:00~18:00", 3: "12:00~18:00", 5: "07:00~12:00" }],
-  ["최수빈", { 2: "18:00~22:30", 6: "10:00~18:00", 0: "10:00~15:00" }],
   ["백인서", { 3: "18:00~22:30" }],
-  ["손민영", { 4: "12:00~18:00" }],
-  ["최광효", { 5: "18:00~23:00", 6: "18:00~23:00", 0: "16:00~22:30" }],
 ];
+
+// 근무표에서 쓰는 사람별 색 (사진의 근무표 색)
+const INITIAL_COLORS = {
+  배예빈: "#fff2cc",
+  백인환: "#7030a0",
+  이시헌: "#c6e0b4",
+  정현욱: "#2e75b6",
+  김예린: "#d0cece",
+  최수빈: "#ffff00",
+  백인서: "#ffe699",
+  손민영: "#bdd7ee",
+  최광효: "#8ea9db",
+  매니저: "#ffffff",
+};
+
+// 매니저는 근무표에만 나오고 출근·급여에서는 빠진다
+const MANAGER_SCHEDULE = { 1: "10:00~18:00", 2: "10:00~18:00", 5: "10:00~17:00", 6: "08:00~16:00", 0: "08:00~16:00" };
+const INITIAL_SCHEDULE_META = { period: "10. 5 ~ 11. 8", notes: { 1: "24", 2: "23", 3: "26", 4: "27", 5: "27", 6: "34", 0: "32" } };
+
+const toWeekly = (days) => Object.fromEntries(Object.entries(days).map(([wd, range]) => [wd, parseRange(range)]));
+const isManager = (e) => e.role === "manager";
+
+function managerEmployee() {
+  return { id: uid(), name: "매니저", phone: null, hourlyWage: 0, active: true, role: "manager", color: INITIAL_COLORS["매니저"], weekly: toWeekly(MANAGER_SCHEDULE) };
+}
 
 function initialData() {
   const employees = INITIAL_SCHEDULE.map(([name, days]) => ({
@@ -112,9 +138,11 @@ function initialData() {
     phone: null,
     hourlyWage: DEFAULT_WAGE,
     active: true,
-    weekly: Object.fromEntries(Object.entries(days).map(([wd, range]) => [wd, parseRange(range)])),
+    color: INITIAL_COLORS[name],
+    weekly: toWeekly(days),
   }));
-  const data = { employees, records: [], shifts: {}, filledFrom: FILL_FROM };
+  employees.push(managerEmployee());
+  const data = { employees, records: [], shifts: {}, filledFrom: FILL_FROM, scheduleMeta: structuredClone(INITIAL_SCHEDULE_META) };
   fillSchedule(data, FILL_FROM, todayDateString());
   return data;
 }
@@ -128,6 +156,7 @@ function fillSchedule(data, from, to) {
   const has = new Set(data.records.map((r) => `${r.employeeId}|${r.date}`));
   for (let date = from; date < to; date = addDays(date, 1)) {
     for (const e of data.employees) {
+      if (isManager(e)) continue;
       const shift = e.weekly[weekdayOf(date)];
       if (!shift || has.has(`${e.id}|${date}`)) continue;
       const clockIn = kstIso(date, shift.start);
@@ -192,7 +221,7 @@ function scheduledOn(date) {
   const wd = weekdayOf(date);
   const extra = store.shifts[date] ?? {};
   return store.employees
-    .filter((e) => e.active && (e.weekly[wd] || extra[e.id]))
+    .filter((e) => e.active && !isManager(e) && (e.weekly[wd] || extra[e.id]))
     .sort((a, b) => (shiftFor(a, date).start < shiftFor(b, date).start ? -1 : 1));
 }
 
@@ -243,6 +272,21 @@ if (!store.filledFrom || store.filledFrom > FILL_FROM) {
   const firstExisting = store.records.reduce((min, r) => (r.date < min ? r.date : min), todayDateString());
   fillSchedule(store, FILL_FROM, firstExisting);
   store.filledFrom = FILL_FROM;
+}
+// 근무표용 색·매니저·제목/비고가 없으면 한 번 넣는다
+if (!store.scheduleMeta) {
+  for (const e of store.employees) e.color = e.color ?? INITIAL_COLORS[e.name] ?? "#ffffff";
+  if (!store.employees.some(isManager)) store.employees.push(managerEmployee());
+  store.scheduleMeta = structuredClone(INITIAL_SCHEDULE_META);
+}
+// 직원 순서를 근무표 배치 순서로 한 번 맞춘다 (목록에 없는 사람은 뒤로)
+if (!store.orderSet) {
+  const rank = (e) => {
+    const i = INITIAL_SCHEDULE.findIndex(([name]) => name === e.name);
+    return isManager(e) ? 1000 : i < 0 ? 500 : i;
+  };
+  store.employees.sort((a, b) => rank(a) - rank(b));
+  store.orderSet = true;
 }
 save();
 
@@ -546,6 +590,7 @@ function renderAdminShell(active, content) {
     <main class="admin-main">${content}</main>
     <nav class="admin-bottom" aria-label="관리자 메뉴">
       ${link("#/admin/employees", "직원 관리", "employees")}
+      ${link("#/admin/schedule", "근무표", "schedule")}
       ${link("#/admin/records", "근무 기록", "records")}
       <button type="button" data-action="logout">로그아웃</button>
     </nav>`;
@@ -558,7 +603,7 @@ function renderEmployees() {
     .map(
       (e) => `
       <tr>
-        <td class="name">${esc(e.name)}<div class="muted small">${esc(e.phone || "")}</div></td>
+        <td class="name"><span class="name-cell"><input type="color" class="swatch" value="${e.color || "#ffffff"}" data-color="${e.id}" aria-label="${esc(e.name)} 근무표 색" />${esc(e.name)}</span><div class="muted small">${esc(e.phone || "")}</div></td>
         ${order
           .map(
             (wd) =>
@@ -567,6 +612,7 @@ function renderEmployees() {
           .join("")}
         <td><input class="field" style="width:88px;padding:4px 8px" type="number" value="${e.hourlyWage}" data-wage="${e.id}" aria-label="${esc(e.name)} 시급" /></td>
         <td><button type="button" class="status${e.active ? " on" : ""}" data-action="toggle-active" data-id="${e.id}">${e.active ? "재직중" : "비활성"}</button></td>
+        <td><button type="button" class="status${isManager(e) ? " on" : ""}" data-action="toggle-role" data-id="${e.id}" title="매니저는 근무표에만 나오고 출근·급여 계산에서 빠져요">${isManager(e) ? "매니저" : "알바"}</button></td>
         <td><button type="button" class="danger" data-action="remove-employee" data-id="${e.id}">삭제</button></td>
       </tr>`,
     )
@@ -582,11 +628,11 @@ function renderEmployees() {
       <div><label for="f-wage">시급(원)</label><input id="f-wage" class="field" style="width:112px" type="number" value="${DEFAULT_WAGE}" required /></div>
       <button type="submit" class="pill">추가</button>
     </form>
-    <p class="hint">요일 칸에 <b>7-12</b>, <b>18-2230</b> 처럼 입력하면 근무 시간이 저장돼요. 비우면 쉬는 날이에요.</p>
+    <p class="hint">요일 칸에 <b>7-12</b>, <b>18-2230</b> 처럼 입력하면 근무 시간이 저장돼요. 비우면 쉬는 날이에요. 이름 앞 색은 근무표 색이고, 근무표에서 같은 시각에 시작하면 위에 있는 사람이 왼쪽 칸에 들어가요.</p>
     <div class="table-wrap">
       <table class="schedule">
-        <thead><tr><th>이름</th>${order.map((wd) => `<th class="${wd === 0 ? "rest" : ""}">${WEEKDAYS[wd]}</th>`).join("")}<th>시급</th><th>상태</th><th>관리</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="11" class="empty">등록된 직원이 없습니다.</td></tr>`}</tbody>
+        <thead><tr><th>이름</th>${order.map((wd) => `<th class="${wd === 0 ? "rest" : ""}">${WEEKDAYS[wd]}</th>`).join("")}<th>시급</th><th>상태</th><th>구분</th><th>관리</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="12" class="empty">등록된 직원이 없습니다.</td></tr>`}</tbody>
       </table>
     </div>`,
   );
@@ -718,13 +764,13 @@ function timesheet(ym, employeeId) {
 
 function renderTimesheet(ym, employeeId) {
   const { days, rows } = timesheet(ym, employeeId);
-  if (!rows.length) return `<div class="table-wrap"><p class="empty">이 달의 근무 기록이 없습니다.</p></div>`;
+  if (!rows.length) return `<div class="table-wrap ts-wrap"><p class="empty">이 달의 근무 기록이 없습니다.</p></div>`;
   const wkClass = (d) => {
     const wd = weekdayOf(d);
     return wd === 0 || wd === 6 ? " weekend" : "";
   };
   return `
-    <div class="table-wrap">
+    <div class="table-wrap ts-wrap">
       <table class="timesheet">
         <thead>
           <tr>
@@ -873,7 +919,7 @@ function renderRecords() {
         <label for="r-emp">직원</label>
         <select id="r-emp" class="field" data-payroll="employeeId">
           <option value="">전체</option>
-          ${store.employees.map((e) => `<option value="${e.id}"${e.id === employeeId ? " selected" : ""}>${esc(e.name)}</option>`).join("")}
+          ${store.employees.filter((e) => !isManager(e)).map((e) => `<option value="${e.id}"${e.id === employeeId ? " selected" : ""}>${esc(e.name)}</option>`).join("")}
         </select>
       </div>
       <div>
@@ -887,7 +933,7 @@ function renderRecords() {
       <button type="button" class="pill" data-action="payslip-pdf-all"${rows.length ? "" : " disabled"}>명세서 PDF ${rows.length > 1 ? "(전체)" : ""}</button>
     </div>
 
-    <h3>근무표</h3>
+    <h3>근무 상세</h3>
     ${renderTimesheet(month, employeeId)}
 
     <h3>급여 정산</h3>
@@ -1029,9 +1075,9 @@ function exportXlsx(button) {
     };
 
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, wsTs, "근무표");
+    XLSX.utils.book_append_sheet(wb, wsTs, "근무 상세");
     XLSX.utils.book_append_sheet(wb, plain(summary, [10, 8, 10, 9, 12, 12, 10, 12, 10, 11, 12], 3), "급여 정산");
-    XLSX.utils.book_append_sheet(wb, plain(detail, [12, 6, 10, 8, 8, 10, 9, 11], 6), "근무 상세");
+    XLSX.utils.book_append_sheet(wb, plain(detail, [12, 6, 10, 8, 8, 10, 9, 11], 6), "출퇴근 목록");
     XLSX.utils.book_append_sheet(wb, plain(weekly, [10, 12, 12, 10, 10, 11, 16], 5), "주휴수당 내역");
     const who = employeeId ? `_${employeeById(employeeId).name}` : "";
     XLSX.writeFile(wb, `근무기록_${month}${who}.xlsx`);
@@ -1068,6 +1114,152 @@ async function payslipPdf(button, empIds) {
   });
 }
 
+// ---------- 주간 근무표 (게시용) ----------
+// 직원별 요일 근무 시간으로 자동 생성. 요일마다 시작 시간 순으로 비어 있는 칸에 배치한다.
+
+const SCHEDULE_DAYS = [1, 2, 3, 4, 5, 6, 0]; // 월 ~ 일
+const toMin = (hhmm) => {
+  const [h, m] = hhmm.split(":").map(Number);
+  return h * 60 + m;
+};
+const fromMin = (min) => `${Math.floor(min / 60)}:${String(min % 60).padStart(2, "0")}`;
+
+// 배경색이 어두우면 글자를 흰색으로
+function textOn(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  return 0.299 * r + 0.587 * g + 0.114 * b < 140 ? "#ffffff" : "#111111";
+}
+
+function scheduleLayout() {
+  const order = new Map(store.employees.map((e, i) => [e.id, i]));
+  const days = SCHEDULE_DAYS.map((wd) => {
+    const people = store.employees
+      .filter((e) => e.active && e.weekly[wd])
+      .map((e) => ({ emp: e, start: toMin(e.weekly[wd].start), end: toMin(e.weekly[wd].end) }))
+      .sort((a, b) => a.start - b.start || order.get(a.emp.id) - order.get(b.emp.id));
+    const cols = [];
+    for (const p of people) {
+      const col = cols.find((c) => c[c.length - 1].end <= p.start);
+      if (col) col.push(p);
+      else cols.push([p]);
+    }
+    while (cols.length < 2) cols.push([]);
+    return { wd, cols };
+  });
+
+  // 행 경계: 정시 + 누군가 시작/끝나는 시각
+  const all = days.flatMap((d) => d.cols.flat());
+  const first = Math.floor(Math.min(...all.map((p) => p.start), 7 * 60) / 60) * 60;
+  const last = Math.max(...all.map((p) => p.end), 23 * 60);
+  const marks = new Set();
+  for (let t = first; t <= last; t += 60) marks.add(t);
+  all.forEach((p) => marks.add(p.start).add(p.end));
+  marks.add(last);
+  const bounds = [...marks].filter((t) => t <= last).sort((a, b) => a - b);
+  const rows = bounds.slice(0, -1).map((start, i) => ({ start, end: bounds[i + 1] }));
+  return { days, rows };
+}
+
+function renderScheduleSheet() {
+  const { days, rows } = scheduleLayout();
+  const meta = store.scheduleMeta ?? {};
+  const occupant = (col, row) => col.find((p) => p.start <= row.start && p.end >= row.end);
+  // 같은 정시(예: 22:00~22:30, 22:30~23:00)에 속한 행들은 같은 사람이면 한 칸으로 합친다
+  const hourOf = (row) => Math.floor(row.start / 60);
+
+  const body = rows
+    .map((row, i) => {
+      const cells = days
+        .map((d) =>
+          d.cols
+            .map((col) => {
+              const who = occupant(col, row);
+              const group = rows.filter((r) => hourOf(r) === hourOf(row));
+              const gi = group.indexOf(row);
+              const sameAll = group.length > 1 && group.every((r) => occupant(col, r) === who);
+              if (sameAll && gi > 0) return "";
+              const span = sameAll ? ` rowspan="${group.length}"` : "";
+              if (!who) return `<td class="sc-empty"${span}></td>`;
+              const bg = who.emp.color || "#ffffff";
+              return `<td class="sc-name"${span} style="background:${bg};color:${textOn(bg)}">${esc(who.emp.name)}</td>`;
+            })
+            .join(""),
+        )
+        .join("");
+      const time = `<td class="sc-time">${fromMin(row.start)}</td><td class="sc-time">${fromMin(row.end)}</td>`;
+      return `<tr>${time}${cells}${time}</tr>`;
+    })
+    .join("");
+
+  const head = days
+    .map((d) => `<th colspan="${d.cols.length}" class="${d.wd === 0 || d.wd === 6 ? "sc-rest" : ""}">${WEEKDAYS[d.wd]}</th>`)
+    .join("");
+  const notes = days
+    .map((d) => `<td colspan="${d.cols.length}" class="sc-note"><input value="${esc(meta.notes?.[d.wd] ?? "")}" data-note="${d.wd}" aria-label="${WEEKDAYS[d.wd]}요일 비고" /></td>`)
+    .join("");
+
+  return `
+    <div class="sched-sheet" id="sched-sheet">
+      <h2 class="sc-title">[${STORE_NAME} 근무표](<input class="sc-period" value="${esc(meta.period ?? "")}" size="${Math.max(6, [...(meta.period ?? "")].length)}" data-meta="period" placeholder="10. 5 ~ 11. 8" aria-label="기간" />)</h2>
+      <table class="sched">
+        <thead><tr><th colspan="2">시간</th>${head}<th colspan="2">시간</th></tr></thead>
+        <tbody>
+          ${body}
+          <tr class="sc-foot"><td colspan="2">비 고</td>${notes}<td colspan="2">비 고</td></tr>
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function renderSchedule() {
+  return renderAdminShell(
+    "schedule",
+    `
+    <div class="sched-bar">
+      <p class="hint">직원 관리의 요일별 근무 시간으로 자동으로 만들어져요. 제목의 기간과 비고 칸은 눌러서 바로 고칠 수 있어요.</p>
+      <button type="button" class="pill" data-action="schedule-pdf">PDF 저장</button>
+    </div>
+    <div class="sched-scroll">${renderScheduleSheet()}</div>`,
+  );
+}
+
+async function schedulePdf(button) {
+  return withBusy(button, "PDF 만드는 중…", async () => {
+    const [html2canvas, jsPDF] = await Promise.all([loadLib("html2canvas"), loadLib("jspdf")]);
+    await document.fonts.ready;
+    const sheet = document.getElementById("sched-sheet");
+    sheet.classList.add("capturing");
+    // PDF 변환기가 늘어나는 SVG 배경을 못 그려서, 칸 크기에 딱 맞는 사선을 칸마다 넣는다
+    const empties = [...sheet.querySelectorAll(".sc-empty")];
+    for (const td of empties) {
+      const { width: w, height: h } = td.getBoundingClientRect();
+      const svgLine = `<svg xmlns='http://www.w3.org/2000/svg' width='${w}' height='${h}'><line x1='0' y1='${h}' x2='${w}' y2='0' stroke='#555' stroke-width='1'/></svg>`;
+      td.style.backgroundImage = `url("data:image/svg+xml,${encodeURIComponent(svgLine)}")`;
+      td.style.backgroundSize = `${w}px ${h}px`;
+    }
+    // 기간 입력칸은 글자로 바꿔서 찍는다 (입력칸 여백이 생기지 않게)
+    const period = sheet.querySelector(".sc-period");
+    const periodText = document.createElement("span");
+    periodText.textContent = period.value;
+    period.replaceWith(periodText);
+    try {
+      const canvas = await html2canvas(sheet, { scale: 2, backgroundColor: "#ffffff" });
+      const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "landscape" });
+      const margin = 8;
+      const w = 297 - margin * 2;
+      const h = Math.min(210 - margin * 2, (canvas.height / canvas.width) * w);
+      const fitW = (canvas.width / canvas.height) * h;
+      pdf.addImage(canvas.toDataURL("image/jpeg", 0.95), "JPEG", (297 - fitW) / 2, margin, fitW, h);
+      pdf.save(`근무표_${(store.scheduleMeta?.period || todayDateString()).replace(/[\s.~]+/g, "_")}.pdf`);
+    } finally {
+      periodText.replaceWith(period);
+      empties.forEach((td) => td.removeAttribute("style"));
+      sheet.classList.remove("capturing");
+    }
+  });
+}
+
 // ---------- 라우팅 ----------
 
 function route() {
@@ -1076,7 +1268,8 @@ function route() {
   if (day) return { name: "day", date: day[1] };
   if (hash.startsWith("/admin")) {
     if (!isAdmin()) return { name: "home" };
-    return { name: hash === "/admin/records" ? "records" : "employees" };
+    const page = { "/admin/records": "records", "/admin/schedule": "schedule" }[hash];
+    return { name: page ?? "employees" };
   }
   return { name: "home" };
 }
@@ -1086,6 +1279,7 @@ function render() {
   if (r.name === "day") app.innerHTML = renderDayPage(r.date);
   else if (r.name === "employees") app.innerHTML = renderEmployees();
   else if (r.name === "records") app.innerHTML = renderRecords();
+  else if (r.name === "schedule") app.innerHTML = renderSchedule();
   else app.innerHTML = renderHome();
 
   // 처음 날짜를 눌렀을 때 달력이 줄어드는 애니메이션
@@ -1282,6 +1476,15 @@ app.addEventListener("click", (e) => {
       state.payroll.month = shiftMonth(state.payroll.month, action === "payroll-prev" ? -1 : 1);
       state.payslipId = null;
       break;
+    case "toggle-role": {
+      const emp = employeeById(id);
+      emp.role = isManager(emp) ? undefined : "manager";
+      save();
+      break;
+    }
+    case "schedule-pdf":
+      schedulePdf(el);
+      return;
     case "open-payslip":
       state.payslipId = id;
       break;
@@ -1377,6 +1580,18 @@ app.addEventListener("change", (e) => {
       }
     }
     t.value = formatRange(emp.weekly[wd]);
+    return;
+  }
+  if (t.dataset.color) {
+    employeeById(t.dataset.color).color = t.value;
+    save();
+    return;
+  }
+  if (t.dataset.note !== undefined || t.dataset.meta) {
+    const meta = store.scheduleMeta ?? (store.scheduleMeta = { notes: {} });
+    if (t.dataset.meta) meta[t.dataset.meta] = t.value.trim();
+    else meta.notes = { ...meta.notes, [t.dataset.note]: t.value.trim() };
+    save();
     return;
   }
   if (t.dataset.allow) {
