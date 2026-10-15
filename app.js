@@ -353,8 +353,15 @@ function syncWeekday(emp, wd) {
 
 // 요일 근무 시간 변경 (근무표·직원 관리 공용). range 가 없으면 그 요일은 쉬는 날.
 function setWeekly(emp, wd, range) {
+  // 근무표 기간 시작일부터는 새 근무표, 그 전 날짜는 원래 근무표로 주휴수당을 계산한다
+  const from = scheduleStart();
+  if (!emp.weeklyHistory) {
+    emp.weeklyBase = structuredClone(emp.weekly);
+    emp.weeklyHistory = [];
+  }
   if (range) emp.weekly[wd] = range;
   else delete emp.weekly[wd];
+  emp.weeklyHistory = [...emp.weeklyHistory.filter((snap) => snap.from < from), { from, weekly: structuredClone(emp.weekly) }];
   syncWeekday(emp, wd);
   save();
 }
@@ -745,8 +752,10 @@ function renderEmployees() {
 }
 
 // ---------- 급여 계산 ----------
-// 주휴수당: 월~일 한 주에 15시간 이상 일하고 근무표상 근무일에 모두 출근했으면
-//   (그 주 근무시간 ÷ 40) × 8시간 × 시급  (40시간 이상이면 8시간분)
+// 주휴수당 (근로기준법 제55조): 월~일 한 주의 소정근로시간(근무표의 요일별 고정 근무 시간 합계)이
+//   15시간 이상이고 근무표상 근무일에 모두 출근했으면
+//   (소정근로시간 ÷ 40) × 8시간 × 시급  (40시간 이상이면 8시간분)
+//   대타·추가 근무처럼 근무표에 없던 시간은 소정근로시간에 넣지 않는다.
 //   주가 끝나는 일요일이 속한 달에 넣고, 아직 끝나지 않은 주는 계산하지 않는다.
 // 세금(3.3%): 소득세 3% + 지방소득세(소득세의 10%), 10원 미만 절사, 소득세 1,000원 미만이면 걷지 않음(소액부징수).
 
@@ -758,6 +767,22 @@ function monthRecords(ym, employeeId) {
 
 function isScheduled(emp, date) {
   return Boolean(emp.weekly[weekdayOf(date)] || store.shifts[date]?.[emp.id]);
+}
+
+// 그 날짜에 적용되던 요일별 고정 근무 (근무표를 바꾸기 전 날짜는 바꾸기 전 근무표)
+function weeklyOn(emp, date) {
+  if (!emp.weeklyHistory) return emp.weekly;
+  let weekly = emp.weeklyBase;
+  for (const snap of emp.weeklyHistory) if (snap.from <= date) weekly = snap.weekly;
+  return weekly;
+}
+
+// 소정근로시간: 그 주(월~일) 근무표상 고정 근무 시간 합계
+function plannedHours(emp, days) {
+  return days.reduce((sum, d) => {
+    const s = weeklyOn(emp, d)[weekdayOf(d)];
+    return s ? sum + hoursBetween(kstIso(d, s.start), endIso(d, s.start, s.end)) : sum;
+  }, 0);
 }
 
 function weeklyAllowance(emp, ym) {
@@ -774,12 +799,13 @@ function weeklyAllowance(emp, ym) {
     const recs = store.records.filter((r) => r.employeeId === emp.id && r.date >= mon && r.date <= sun);
     const hours = recs.reduce((sum, r) => sum + hoursBetween(r.clockIn, r.clockOut), 0);
     if (!recs.length) continue;
+    const planned = plannedHours(emp, days);
     let reason = "";
     if (sun >= today) reason = "주가 아직 안 끝남";
-    else if (hours < 15) reason = "주 15시간 미만";
-    else if (days.some((x) => isScheduled(emp, x) && !recordFor(emp.id, x))) reason = "결근 있음";
-    const allowHours = reason ? 0 : Math.min(hours, 40) / 5;
-    weeks.push({ mon, sun, hours, reason, allowHours, amount: Math.round(allowHours * emp.hourlyWage) });
+    else if (planned < 15) reason = "소정근로 15시간 미만";
+    else if (days.some((x) => weeklyOn(emp, x)[weekdayOf(x)] && !recordFor(emp.id, x))) reason = "결근 있음";
+    const allowHours = reason ? 0 : Math.min(planned, 40) / 5;
+    weeks.push({ mon, sun, hours, planned, reason, allowHours, amount: Math.round(allowHours * emp.hourlyWage) });
   }
   return { weeks, total: weeks.reduce((sum, w) => sum + w.amount, 0) };
 }
@@ -1041,7 +1067,7 @@ function renderRecords() {
         <td class="num">${r.days}일</td>
         <td class="num">${hrs(r.hours)}</td>
         <td class="num">${won(r.base)}</td>
-        <td class="num" title="${esc(r.weekly.weeks.map((w) => `${shortDate(w.mon)}~${shortDate(w.sun)} ${hrs(w.hours)} ${w.reason || `→ ${won(w.amount)}`}`).join("\n"))}">${won(r.weekly.total)}</td>
+        <td class="num" title="${esc(r.weekly.weeks.map((w) => `${shortDate(w.mon)}~${shortDate(w.sun)} 소정 ${hrs(w.planned)} (실근무 ${hrs(w.hours)}) ${w.reason || `→ ${won(w.amount)}`}`).join("\n"))}">${won(r.weekly.total)}</td>
         <td class="num">${won(r.extra)}</td>
         <td class="num strong">${won(r.gross)}</td>
         <td class="num">${won(r.income)}</td>
@@ -1105,7 +1131,7 @@ function renderRecords() {
     </div>
     ${helpToggle(
       "records",
-      `주휴수당: 월~일 한 주에 15시간 이상 일하고 근무표상 근무일에 모두 출근하면 (주 근무시간 ÷ 40) × 8시간 × 시급. 그 주가 끝나는 일요일이 속한 달에 포함되고, 아직 끝나지 않은 주는 빠져요. 금액에 마우스를 올리면 주별 내역이 보여요.<br />
+      `주휴수당: 월~일 한 주의 소정근로시간(근무표의 고정 근무 시간)이 15시간 이상이고 근무표상 근무일에 모두 출근하면 (소정근로시간 ÷ 40) × 8시간 × 시급. 대타·추가 근무 시간은 넣지 않아요. 그 주가 끝나는 일요일이 속한 달에 포함되고, 아직 끝나지 않은 주는 빠져요. 금액에 마우스를 올리면 주별 내역이 보여요.<br />
       수당(교육수당·특근수당 등)은 이름 옆 <b>명세서</b>를 눌러 입력해요.<br />
       ${taxOn ? "세금: 소득세 3% + 지방소득세(소득세의 10%), 10원 미만 절사. 소득세가 1,000원 미만이면 공제하지 않아요." : "세금을 공제하지 않고 계산했어요."}`,
     )}
@@ -1208,9 +1234,9 @@ function exportXlsx(button) {
       }),
     ];
 
-    const weekly = [["이름", "주 시작(월)", "주 끝(일)", "근무시간", "주휴시간", "주휴수당", "비고"]];
+    const weekly = [["이름", "주 시작(월)", "주 끝(일)", "소정근로시간", "실근무시간", "주휴시간", "주휴수당", "비고"]];
     for (const r of rows) {
-      for (const w of r.weekly.weeks) weekly.push([r.emp.name, w.mon, w.sun, round2(w.hours), round2(w.allowHours), w.amount, w.reason || ""]);
+      for (const w of r.weekly.weeks) weekly.push([r.emp.name, w.mon, w.sun, round2(w.planned), round2(w.hours), round2(w.allowHours), w.amount, w.reason || ""]);
     }
 
     const plain = (aoa, widths, moneyFrom) => {
@@ -1232,7 +1258,7 @@ function exportXlsx(button) {
     XLSX.utils.book_append_sheet(wb, wsTs, "근무 상세");
     XLSX.utils.book_append_sheet(wb, plain(summary, [10, 8, 10, 9, 12, 12, 10, 12, 10, 11, 12], 3), "급여 정산");
     XLSX.utils.book_append_sheet(wb, plain(detail, [12, 6, 10, 8, 8, 10, 9, 11], 6), "출퇴근 목록");
-    XLSX.utils.book_append_sheet(wb, plain(weekly, [10, 12, 12, 10, 10, 11, 16], 5), "주휴수당 내역");
+    XLSX.utils.book_append_sheet(wb, plain(weekly, [10, 12, 12, 12, 11, 10, 11, 20], 6), "주휴수당 내역");
     const who = employeeId ? `_${employeeById(employeeId).name}` : "";
     XLSX.writeFile(wb, `근무기록_${month}${who}.xlsx`);
   });
