@@ -428,6 +428,8 @@ const state = {
   payroll: { month: "", employeeId: "" }, // 근무 기록 화면: "2026-10"
   payslipId: null, // 급여명세서 창을 연 직원
   slotEdit: null, // 근무표에서 편집 중인 칸 { wd, empId, start }
+  schedWork: null, // 근무표 편집 초안 (저장 전)
+  allowDraft: null, // 명세서 창에서 수정 중인 수당 (저장 전)
 };
 
 {
@@ -445,7 +447,7 @@ function renderUnlock() {
   }
   return `
     <div class="unlock" id="unlock">
-      <input id="pin-input" class="pin-input" type="password" inputmode="numeric" maxlength="${PIN_LENGTH}" autocomplete="off" placeholder="관리자 번호" aria-label="관리자 번호" />
+      <input id="pin-input" class="pin-input" type="password" inputmode="numeric" maxlength="${PIN_LENGTH}" autocomplete="off" aria-label="관리자 번호" />
     </div>`;
 }
 
@@ -653,17 +655,32 @@ function renderDayPage(date) {
 
 // ---------- 화면: 관리자 ----------
 
-function renderAdminShell(active, content) {
+function renderAdminShell(active, content, { center = false } = {}) {
   const link = (href, label, key) => `<a href="${href}" class="${active === key ? "active" : ""}">${label}</a>`;
   return `
-    <main class="admin-main">${content}</main>
-    <nav class="admin-bottom" aria-label="관리자 메뉴">
+    <nav class="admin-top" aria-label="관리자 메뉴">
       ${link("#/admin/employees", "직원 관리", "employees")}
       ${link("#/admin/schedule", "근무표", "schedule")}
       ${link("#/admin/records", "근무 기록", "records")}
       <button type="button" data-action="logout">로그아웃</button>
-    </nav>`;
+    </nav>
+    <main class="admin-main${center ? " centered" : ""}">${content}</main>`;
 }
+
+// 010-1234-5678 형태로
+function formatPhone(text) {
+  const d = String(text ?? "").replace(/\D/g, "").slice(0, 11);
+  if (d.startsWith("02")) return [d.slice(0, 2), d.slice(2, d.length > 9 ? 6 : 5), d.slice(d.length > 9 ? 6 : 5)].filter(Boolean).join("-");
+  if (d.length <= 3) return d;
+  if (d.length <= 7) return `${d.slice(0, 3)}-${d.slice(3)}`;
+  return `${d.slice(0, 3)}-${d.slice(3, d.length - 4)}-${d.slice(-4)}`;
+}
+
+const formatMoney = (text) => {
+  const d = String(text ?? "").replace(/\D/g, "");
+  return d ? Number(d).toLocaleString() : "";
+};
+const parseMoney = (text) => Number(String(text).replace(/\D/g, "")) || 0;
 
 function renderEmployees() {
   // 표는 월요일부터
@@ -672,14 +689,14 @@ function renderEmployees() {
     .map(
       (e) => `
       <tr>
-        <td class="name"><span class="name-cell"><span class="swatch" style="background:${e.color || "#ffffff"}" title="근무표 색 (자동)"></span>${esc(e.name)}</span><div class="muted small">${esc(e.phone || "")}</div></td>
+        <td class="name"><span class="name-cell"><span class="swatch" style="background:${e.color || "#ffffff"}" title="근무표 색 (자동)"></span>${esc(e.name)}</span><div class="muted small">${esc(e.phone ? formatPhone(e.phone) : "")}</div></td>
         ${order
           .map(
             (wd) =>
               `<td class="day-cell"><input class="field range" type="text" placeholder="-" value="${formatRange(e.weekly[wd])}" data-weekly="${wd}" data-id="${e.id}" aria-label="${esc(e.name)} ${WEEKDAYS[wd]}요일 근무 시간" /></td>`,
           )
           .join("")}
-        <td><input class="field" style="width:88px;padding:4px 8px" type="number" value="${e.hourlyWage}" data-wage="${e.id}" aria-label="${esc(e.name)} 시급" /></td>
+        <td><input class="field money" style="width:88px;padding:4px 8px" type="text" inputmode="numeric" value="${formatMoney(e.hourlyWage)}" data-wage="${e.id}" aria-label="${esc(e.name)} 시급" /></td>
         <td><button type="button" class="status${e.active ? " on" : ""}" data-action="toggle-active" data-id="${e.id}">${e.active ? "재직중" : "비활성"}</button></td>
         <td><button type="button" class="status${isManager(e) ? " on" : ""}" data-action="toggle-role" data-id="${e.id}" title="매니저는 근무표에만 나오고 출근·급여 계산에서 빠져요">${isManager(e) ? "매니저" : "알바"}</button></td>
         <td><button type="button" class="danger" data-action="remove-employee" data-id="${e.id}">삭제</button></td>
@@ -690,11 +707,10 @@ function renderEmployees() {
   return renderAdminShell(
     "employees",
     `
-    <h2>직원 관리</h2>
     <form class="toolbar" id="add-employee" style="margin-bottom:32px">
       <div><label for="f-name">이름</label><input id="f-name" class="field" style="width:112px" required /></div>
-      <div><label for="f-phone">전화번호 (선택)</label><input id="f-phone" class="field" style="width:144px" placeholder="01012345678" /></div>
-      <div><label for="f-wage">시급(원)</label><input id="f-wage" class="field" style="width:112px" type="number" value="${DEFAULT_WAGE}" required /></div>
+      <div><label for="f-phone">전화번호 (선택)</label><input id="f-phone" class="field phone" style="width:144px" type="text" inputmode="numeric" placeholder="010-0000-0000" /></div>
+      <div><label for="f-wage">시급(원)</label><input id="f-wage" class="field money" style="width:112px" type="text" inputmode="numeric" value="${formatMoney(DEFAULT_WAGE)}" required /></div>
       <button type="submit" class="pill">추가</button>
     </form>
     <p class="hint">요일 칸에 <b>7-12</b>, <b>18-2230</b> 처럼 입력하면 근무 시간이 저장돼요. 비우면 쉬는 날이에요. 이름 앞 색은 근무표 색이에요(자동으로 겹치지 않게 정해져요). 근무표에서 같은 시각에 시작하면 위에 있는 사람이 왼쪽 칸에 들어가요.</p>
@@ -704,6 +720,7 @@ function renderEmployees() {
         <tbody>${rows || `<tr><td colspan="12" class="empty">등록된 직원이 없습니다.</td></tr>`}</tbody>
       </table>
     </div>`,
+    { center: true },
   );
 }
 
@@ -766,12 +783,12 @@ function setAllowances(ym, empId, list) {
   store.allowances[ym] = { ...store.allowances[ym], [empId]: list };
 }
 
-function payrollRow(emp, ym, recs) {
+function payrollRow(emp, ym, recs, allowanceOverride) {
   const mine = recs.filter((r) => r.employeeId === emp.id);
   const hours = mine.reduce((sum, r) => sum + hoursBetween(r.clockIn, r.clockOut), 0);
   const base = Math.round(hours * emp.hourlyWage);
   const weekly = weeklyAllowance(emp, ym);
-  const allowances = allowancesFor(ym, emp.id);
+  const allowances = allowanceOverride ?? allowancesFor(ym, emp.id);
   const extra = allowances.reduce((sum, a) => sum + (Number(a.amount) || 0), 0);
   const gross = base + weekly.total + extra;
   const tax = taxes(gross);
@@ -919,21 +936,22 @@ function renderPayslipModal() {
   if (!empId) return "";
   const { month } = state.payroll;
   const emp = employeeById(empId);
-  const r = payrollRow(emp, month, monthRecords(month, empId));
+  // 명세서 창에서는 저장 전까지 수정 중인 수당(state.allowDraft)으로 미리 계산
+  const r = payrollRow(emp, month, monthRecords(month, empId), state.allowDraft);
   const list = r.allowances;
   return `
     <div class="ps-backdrop" data-action="close-payslip">
       <div class="ps-dialog" data-stop>
         <div class="ps-side">
           <p class="staff-title">${esc(emp.name)} · ${Number(month.slice(5, 7))}월 명세서</p>
-          <p class="sub">수당을 입력하면 지급액과 세금이 다시 계산돼요.</p>
+          <p class="sub">수당을 입력하면 지급액과 세금이 다시 계산돼요. 저장한 뒤 근무 기록의 <b>명세서 PDF</b>로 한꺼번에 받을 수 있어요.</p>
           <div class="ps-allow">
             ${list
               .map(
                 (a, i) => `
               <div class="ps-allow-row">
                 <input class="field" value="${esc(a.name)}" placeholder="수당 이름" data-allow="name" data-index="${i}" aria-label="수당 이름" />
-                <input class="field ps-allow-amount" type="text" inputmode="numeric" value="${a.amount ? Number(a.amount).toLocaleString() : ""}" placeholder="0" data-allow="amount" data-index="${i}" aria-label="${esc(a.name || "수당")} 금액" />
+                <input class="field ps-allow-amount money" type="text" inputmode="numeric" value="${a.amount ? Number(a.amount).toLocaleString() : ""}" placeholder="0" data-allow="amount" data-index="${i}" aria-label="${esc(a.name || "수당")} 금액" />
                 <button type="button" class="danger" data-action="remove-allowance" data-index="${i}" aria-label="삭제">삭제</button>
               </div>`,
               )
@@ -942,7 +960,7 @@ function renderPayslipModal() {
           </div>
           <div class="action-row">
             <button type="button" class="btn-ghost" data-action="close-payslip">닫기</button>
-            <button type="button" class="btn-primary" data-action="payslip-pdf" data-id="${empId}">PDF 저장</button>
+            <button type="button" class="btn-primary" data-action="save-payslip">저장</button>
           </div>
         </div>
         <div class="ps-preview">${renderPayslip(r, month)}</div>
@@ -978,12 +996,12 @@ function renderRecords() {
   return renderAdminShell(
     "records",
     `
-    <div class="month-nav">
-      <button type="button" class="round-btn" data-action="payroll-prev" aria-label="이전 달">${ICON_PREV}</button>
-      <h2>${y}년 ${m}월 근무 기록</h2>
-      <button type="button" class="round-btn" data-action="payroll-next" aria-label="다음 달">${ICON_NEXT}</button>
-    </div>
-    <div class="toolbar">
+    <div class="toolbar records-bar">
+      <div class="month-nav">
+        <button type="button" class="round-btn" data-action="payroll-prev" aria-label="이전 달">${ICON_PREV}</button>
+        <h2>${y}년 ${m}월 근무 기록</h2>
+        <button type="button" class="round-btn" data-action="payroll-next" aria-label="다음 달">${ICON_NEXT}</button>
+      </div>
       <div>
         <label for="r-emp">직원</label>
         <select id="r-emp" class="field" data-payroll="employeeId">
@@ -998,14 +1016,18 @@ function renderRecords() {
           <option value="none"${taxOn ? "" : " selected"}>공제 안 함</option>
         </select>
       </div>
-      <button type="button" class="pill plain" data-action="export-xlsx"${recs.length ? "" : " disabled"}>엑셀 다운로드</button>
-      <button type="button" class="pill" data-action="payslip-pdf-all"${rows.length ? "" : " disabled"}>명세서 PDF ${rows.length > 1 ? "(전체)" : ""}</button>
     </div>
 
-    <h3>근무 상세</h3>
+    <div class="section-head">
+      <h3>근무 상세</h3>
+      <button type="button" class="pill plain-dark" data-action="export-xlsx"${recs.length ? "" : " disabled"}>엑셀 다운로드</button>
+    </div>
     ${renderTimesheet(month, employeeId)}
 
-    <h3>급여 정산</h3>
+    <div class="section-head">
+      <h3>급여 정산</h3>
+      <button type="button" class="pill" data-action="payslip-pdf-all"${rows.length ? "" : " disabled"}>명세서 PDF${rows.length > 1 ? " (전체)" : ""}</button>
+    </div>
     <div class="table-wrap">
       <table>
         <thead><tr><th>이름</th><th class="num">근무일</th><th class="num">근무시간</th><th class="num">기본급</th><th class="num">주휴수당</th><th class="num">수당</th><th class="num">지급총액</th><th class="num">소득세</th><th class="num">지방소득세</th><th class="num">실지급액</th><th></th></tr></thead>
@@ -1200,12 +1222,57 @@ function textOn(hex) {
   return 0.299 * r + 0.587 * g + 0.114 * b < 140 ? "#ffffff" : "#111111";
 }
 
+// 근무표 편집은 초안(state.schedWork)에 모아 두었다가 [저장]할 때 한꺼번에 반영한다.
+// 초안 = { weekly: { 직원id: { 요일: {start,end} | null } }, meta: {period, notes} | null }
+// [임시저장]은 초안만 보관(store.scheduleDraft)하고 직원 관리·달력·근무 기록에는 아직 반영하지 않는다.
+function schedWork() {
+  if (!state.schedWork) state.schedWork = structuredClone(store.scheduleDraft ?? { weekly: {}, meta: null });
+  return state.schedWork;
+}
+
+function effWeekly(emp) {
+  const w = { ...emp.weekly };
+  for (const [wd, range] of Object.entries(schedWork().weekly[emp.id] ?? {})) {
+    if (range) w[wd] = range;
+    else delete w[wd];
+  }
+  return w;
+}
+
+const schedMeta = () => schedWork().meta ?? store.scheduleMeta ?? {};
+const schedDirty = () => JSON.stringify(schedWork()) !== JSON.stringify(store.scheduleDraft ?? { weekly: {}, meta: null });
+const hasDraft = () => Object.keys(schedWork().weekly).length > 0 || schedWork().meta !== null;
+
+function draftWeekly(emp, wd, range) {
+  const w = schedWork().weekly;
+  w[emp.id] = { ...w[emp.id], [wd]: range };
+}
+
+function tempSaveSchedule() {
+  store.scheduleDraft = structuredClone(schedWork());
+  save();
+}
+
+function commitSchedule() {
+  const work = schedWork();
+  if (work.meta) store.scheduleMeta = work.meta; // 기간이 바뀌면 적용 시작일도 바뀌므로 먼저
+  for (const [empId, days] of Object.entries(work.weekly)) {
+    const emp = employeeById(empId);
+    if (!emp) continue;
+    for (const [wd, range] of Object.entries(days)) setWeekly(emp, wd, range);
+  }
+  delete store.scheduleDraft;
+  state.schedWork = { weekly: {}, meta: null };
+  save();
+}
+
 function scheduleLayout() {
   const order = new Map(store.employees.map((e, i) => [e.id, i]));
   const days = SCHEDULE_DAYS.map((wd) => {
     const people = store.employees
-      .filter((e) => e.active && e.weekly[wd])
-      .map((e) => ({ emp: e, start: toMin(e.weekly[wd].start), end: toMin(e.weekly[wd].end) }))
+      .map((e) => ({ e, w: effWeekly(e)[wd] }))
+      .filter(({ e, w }) => e.active && w)
+      .map(({ e, w }) => ({ emp: e, start: toMin(w.start), end: toMin(w.end) }))
       .sort((a, b) => a.start - b.start || order.get(a.emp.id) - order.get(b.emp.id));
     const cols = [];
     for (const p of people) {
@@ -1232,7 +1299,7 @@ function scheduleLayout() {
 
 function renderScheduleSheet() {
   const { days, rows } = scheduleLayout();
-  const meta = store.scheduleMeta ?? {};
+  const meta = schedMeta();
   const occupant = (col, row) => col.find((p) => p.start <= row.start && p.end >= row.end);
   // 같은 정시(예: 22:00~22:30, 22:30~23:00)에 속한 행들은 같은 사람이면 한 칸으로 합친다
   const hourOf = (row) => Math.floor(row.start / 60);
@@ -1271,7 +1338,14 @@ function renderScheduleSheet() {
 
   return `
     <div class="sched-sheet" id="sched-sheet">
-      <h2 class="sc-title">[${STORE_NAME} 근무표](<input class="sc-period" value="${esc(meta.period ?? "")}" size="${Math.max(6, [...(meta.period ?? "")].length)}" data-meta="period" placeholder="10. 5 ~ 11. 8" aria-label="기간" />)</h2>
+      <div class="sc-head">
+        <h2 class="sc-title">[${STORE_NAME} 근무표](<input class="sc-period" value="${esc(meta.period ?? "")}" size="${Math.max(6, [...(meta.period ?? "")].length)}" data-meta="period" placeholder="10. 5 ~ 11. 8" aria-label="기간" />)</h2>
+        <div class="sc-actions" data-html2canvas-ignore>
+          <button type="button" class="pill plain-dark" data-action="schedule-temp"${schedDirty() ? "" : " disabled"}>임시저장</button>
+          <button type="button" class="pill" data-action="schedule-save"${hasDraft() ? "" : " disabled"}>저장</button>
+          <button type="button" class="pill plain-dark" data-action="schedule-pdf">PDF 저장</button>
+        </div>
+      </div>
       <table class="sched">
         <thead><tr><th colspan="2">시간</th>${head}<th colspan="2">시간</th></tr></thead>
         <tbody>
@@ -1283,18 +1357,22 @@ function renderScheduleSheet() {
 }
 
 function renderSchedule() {
+  const status = !hasDraft()
+    ? ""
+    : schedDirty()
+      ? `<p class="sched-status warn">저장하지 않은 변경이 있어요. <b>저장</b>을 눌러야 직원 관리·달력·근무 기록에 반영돼요.</p>`
+      : `<p class="sched-status">임시저장된 변경이 있어요. <b>저장</b>을 누르면 반영돼요.</p>`;
   return renderAdminShell(
     "schedule",
     `
-    <div class="sched-bar">
-      <p class="hint">
-        이름 칸을 누르면 시간 수정·삭제, 빈 칸(사선)을 누르면 근무자 추가예요. 바꾸면 직원 관리·달력·근무 기록에 바로 반영돼요.<br />
-        지난 근무 기록은 제목 기간의 시작일(<b>${shortDate(scheduleStart())}</b>)부터 바뀌어요. 제목의 기간과 비고 칸도 눌러서 고칠 수 있어요.
-      </p>
-      <button type="button" class="pill" data-action="schedule-pdf">PDF 저장</button>
-    </div>
     <div class="sched-scroll">${renderScheduleSheet()}</div>
+    ${status}
+    <p class="hint sched-help">
+      이름 칸을 누르면 시간 수정·삭제, 빈 칸(사선)을 누르면 근무자 추가예요. <b>저장</b>하면 직원 관리·달력·근무 기록에 반영되고, <b>임시저장</b>은 반영하지 않고 고친 내용만 보관해요.<br />
+      지난 근무 기록은 제목 기간의 시작일(<b>${shortDate(scheduleStart())}</b>)부터 바뀌어요. 제목의 기간과 비고 칸도 눌러서 고칠 수 있어요.
+    </p>
     ${renderSlotEditor()}`,
+    { center: true },
   );
 }
 
@@ -1302,15 +1380,15 @@ function renderSlotEditor() {
   const ed = state.slotEdit;
   if (!ed) return "";
   const emp = ed.empId ? employeeById(ed.empId) : null;
-  const shift = emp?.weekly[ed.wd];
+  const shift = emp ? effWeekly(emp)[ed.wd] : null;
   const start = shift?.start ?? fromMin(ed.start).padStart(5, "0");
   const end = shift?.end ?? fromMin(Math.min(ed.start + 6 * 60, 23 * 60)).padStart(5, "0");
-  const choices = store.employees.filter((e) => e.active && !e.weekly[ed.wd]);
+  const choices = store.employees.filter((e) => e.active && !effWeekly(e)[ed.wd]);
   return `
     <div class="ps-backdrop" data-action="close-slot">
       <form class="slot-dialog" id="slot-form" data-stop>
         <p class="staff-title">${WEEKDAYS[ed.wd]}요일 · ${emp ? esc(emp.name) : "근무자 추가"}</p>
-        <p class="sub">${shortDate(scheduleStart())}부터 매주 ${WEEKDAYS[ed.wd]}요일에 적용돼요.</p>
+        <p class="sub">근무표 [저장]을 누르면 매주 ${WEEKDAYS[ed.wd]}요일에 적용돼요.</p>
         ${
           emp
             ? ""
@@ -1344,7 +1422,7 @@ function saveSlot() {
     render();
     return;
   }
-  setWeekly(emp, ed.wd, { start, end });
+  draftWeekly(emp, ed.wd, { start, end });
   state.slotEdit = null;
   state.error = "";
   render();
@@ -1430,6 +1508,7 @@ function navigate(hash) {
 window.addEventListener("hashchange", () => {
   resetDayUi();
   state.payslipId = null;
+  state.allowDraft = null;
   state.slotEdit = null;
   state.unlockOpen = false;
   render();
@@ -1614,6 +1693,13 @@ app.addEventListener("click", (e) => {
     case "schedule-pdf":
       schedulePdf(el);
       return;
+    case "schedule-temp":
+      tempSaveSchedule();
+      break;
+    case "schedule-save":
+      if (!window.confirm("근무표를 저장하면 직원 관리·달력·근무 기록에 반영돼요. 저장할까요?")) return;
+      commitSchedule();
+      break;
     case "edit-slot":
       state.error = "";
       state.slotEdit = { wd: el.dataset.wd, empId: el.dataset.id ?? null, start: Number(el.dataset.start) };
@@ -1625,29 +1711,30 @@ app.addEventListener("click", (e) => {
     case "remove-slot": {
       const emp = employeeById(state.slotEdit.empId);
       if (!window.confirm(`${emp.name}님의 ${WEEKDAYS[state.slotEdit.wd]}요일 근무를 근무표에서 뺄까요?`)) return;
-      setWeekly(emp, state.slotEdit.wd, null);
+      draftWeekly(emp, state.slotEdit.wd, null);
       state.slotEdit = null;
       break;
     }
     case "open-payslip":
       state.payslipId = id;
+      state.allowDraft = structuredClone(allowancesFor(state.payroll.month, id));
       break;
     case "close-payslip":
       state.payslipId = null;
+      state.allowDraft = null;
+      break;
+    case "save-payslip":
+      setAllowances(state.payroll.month, state.payslipId, state.allowDraft.filter((a) => a.name || a.amount));
+      save();
+      state.payslipId = null;
+      state.allowDraft = null;
       break;
     case "add-allowance":
-    case "remove-allowance": {
-      const { month } = state.payroll;
-      const list = [...allowancesFor(month, state.payslipId)];
-      if (action === "add-allowance") list.push({ name: "", amount: 0 });
-      else list.splice(Number(el.dataset.index), 1);
-      setAllowances(month, state.payslipId, list);
-      save();
+      state.allowDraft.push({ name: "", amount: 0 });
       break;
-    }
-    case "payslip-pdf":
-      payslipPdf(el, [id]);
-      return;
+    case "remove-allowance":
+      state.allowDraft.splice(Number(el.dataset.index), 1);
+      break;
     case "payslip-pdf-all":
       payslipPdf(el, payrollFor(state.payroll.month, state.payroll.employeeId).rows.map((r) => r.emp.id));
       return;
@@ -1687,14 +1774,14 @@ app.addEventListener("submit", (e) => {
   if (e.target.id !== "add-employee") return;
   e.preventDefault();
   const name = document.getElementById("f-name").value.trim();
-  const phone = document.getElementById("f-phone").value.trim();
-  const wage = Number(document.getElementById("f-wage").value);
+  const phone = formatPhone(document.getElementById("f-phone").value);
+  const wage = parseMoney(document.getElementById("f-wage").value);
   if (!name) return;
   store.employees.push({
     id: uid(),
     name,
     phone: phone || null,
-    hourlyWage: Number.isFinite(wage) ? wage : DEFAULT_WAGE,
+    hourlyWage: wage || DEFAULT_WAGE,
     active: true,
     weekly: {},
   });
@@ -1706,11 +1793,13 @@ app.addEventListener("submit", (e) => {
 app.addEventListener("change", (e) => {
   const t = e.target;
   if (t.dataset.wage) {
-    const wage = Number(t.value);
-    if (Number.isFinite(wage)) {
-      employeeById(t.dataset.wage).hourlyWage = wage;
+    const emp = employeeById(t.dataset.wage);
+    const wage = parseMoney(t.value);
+    if (wage) {
+      emp.hourlyWage = wage;
       save();
     }
+    t.value = formatMoney(emp.hourlyWage);
     return;
   }
   if (t.dataset.weekly) {
@@ -1731,19 +1820,16 @@ app.addEventListener("change", (e) => {
     return;
   }
   if (t.dataset.note !== undefined || t.dataset.meta) {
-    const meta = store.scheduleMeta ?? (store.scheduleMeta = { notes: {} });
+    const work = schedWork();
+    const meta = (work.meta = structuredClone(work.meta ?? store.scheduleMeta ?? { notes: {} }));
     if (t.dataset.meta) meta[t.dataset.meta] = t.value.trim();
     else meta.notes = { ...meta.notes, [t.dataset.note]: t.value.trim() };
-    save();
+    render();
     return;
   }
   if (t.dataset.allow) {
-    const { month } = state.payroll;
-    const list = allowancesFor(month, state.payslipId).map((a) => ({ ...a }));
-    const item = list[Number(t.dataset.index)];
-    item[t.dataset.allow] = t.dataset.allow === "amount" ? Number(t.value.replace(/\D/g, "")) || 0 : t.value.trim();
-    setAllowances(month, state.payslipId, list);
-    save();
+    const item = state.allowDraft[Number(t.dataset.index)];
+    item[t.dataset.allow] = t.dataset.allow === "amount" ? parseMoney(t.value) : t.value.trim();
     render();
     return;
   }
@@ -1791,6 +1877,14 @@ function alertField(id) {
 // 숫자만 남기고 두 자리 뒤에 ":" 를 자동으로 넣는다
 app.addEventListener("input", (e) => {
   const t = e.target;
+  if (t.classList.contains("phone")) {
+    t.value = formatPhone(t.value);
+    return;
+  }
+  if (t.classList.contains("money")) {
+    t.value = formatMoney(t.value);
+    return;
+  }
   if (t.id === "pin-input") {
     t.value = t.value.replace(/\D/g, "").slice(0, PIN_LENGTH);
     if (t.value.length === PIN_LENGTH) submitPin(t.value);

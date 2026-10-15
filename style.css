@@ -120,8 +120,6 @@ ul {
   .home-inner {
     width: var(--card-w);
     max-width: none;
-    /* 제목 높이만큼 아래에도 여백을 줘서 달력 자체가 화면 중앙에 오게 */
-    padding-bottom: 48px;
   }
   .home {
     padding-block: 24px;
@@ -162,15 +160,19 @@ ul {
 
 /* ---------- 관리자 PIN ---------- */
 .unlock {
-  position: relative;
-  margin-bottom: 14px;
-  height: 34px;
+  position: absolute;
+  top: calc(20px + env(safe-area-inset-top, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  height: 38px;
   display: flex;
   align-items: center;
 }
 
 .unlock-title {
-  font-size: 21px;
+  white-space: nowrap;
+  font-size: 24px;
   font-weight: 800;
   letter-spacing: -0.01em;
 }
@@ -664,6 +666,16 @@ ul {
   color: var(--ink);
 }
 
+.staff .add-btn {
+  border: 0;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+.staff .add-btn:hover {
+  box-shadow: inset 0 0 0 1.5px var(--line);
+}
+
 .add-form {
   margin-top: 6px;
   display: flex;
@@ -757,20 +769,16 @@ ul {
 
 
 /* ---------- 관리자 ---------- */
-.admin-bottom {
-  position: sticky;
-  bottom: 0;
-  z-index: 10;
+.admin-top {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
   gap: 8px;
-  border-top: 1px solid var(--line);
-  background: var(--bg);
-  padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+  padding: calc(20px + env(safe-area-inset-top, 0px)) 16px 0;
 }
 
-.admin-bottom a,
-.admin-bottom button {
+.admin-top a,
+.admin-top button {
   border-radius: 999px;
   padding: 10px 22px;
   font-size: 14px;
@@ -779,12 +787,12 @@ ul {
   text-decoration: none;
 }
 
-.admin-bottom a:hover,
-.admin-bottom button:hover {
+.admin-top a:hover,
+.admin-top button:hover {
   color: var(--ink);
 }
 
-.admin-bottom a.active {
+.admin-top a.active {
   background: var(--paper);
   color: var(--ink);
 }
@@ -795,6 +803,14 @@ ul {
   margin: 0 auto;
   flex: 1;
   padding: 32px 16px;
+}
+
+/* 직원 관리·근무표: 화면 세로 가운데 */
+.admin-main.centered {
+  min-height: calc(100vh - 64px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 .admin-main h2 {
@@ -810,19 +826,42 @@ ul {
 }
 
 .month-nav {
-  margin-bottom: 20px;
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.records-bar {
+  align-items: flex-end;
+  gap: 12px 20px;
+}
+
+.records-bar .month-nav {
+  margin-right: 12px;
+  align-self: center;
+}
+
+.records-bar .month-nav .round-btn {
+  background: var(--bg);
+}
+
+.section-head {
+  margin: 32px 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.section-head h3 {
+  margin: 0 !important;
 }
 
 .month-nav h2 {
   margin: 0;
 }
 
-.month-nav .round-btn {
-  background: var(--paper);
-}
+
 
 th.num,
 td.num {
@@ -836,7 +875,6 @@ td.strong {
 
 .total-row td {
   font-weight: 700;
-  background: var(--bg);
 }
 
 .small-hint {
@@ -934,6 +972,11 @@ td.strong {
 
 .pill.plain {
   background: var(--bg);
+  color: var(--ink);
+}
+
+.pill.plain-dark {
+  background: var(--paper);
   color: var(--ink);
 }
 
@@ -1287,18 +1330,6 @@ td.name {
 }
 
 /* ---------- 근무표 (게시용, 사진 양식) ---------- */
-.sched-bar {
-  margin-bottom: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.sched-bar .hint {
-  margin: 0;
-}
-
 .sched-scroll {
   overflow-x: auto;
 }
@@ -1312,8 +1343,29 @@ td.name {
   font-family: "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", -apple-system, sans-serif;
 }
 
+.sc-head {
+  position: relative;
+  margin-bottom: 12px;
+}
+
+.sc-actions {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  gap: 6px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  letter-spacing: 0;
+}
+
+.sc-actions .pill.plain-dark {
+  background: #f2f4f6;
+  color: #201d1a;
+}
+
 .sc-title {
-  margin: 0 0 12px;
+  margin: 0;
   text-align: center;
   font-size: 26px;
   font-weight: 500;
@@ -1441,4 +1493,19 @@ td.name {
 .slot-cancel {
   align-self: center;
   color: var(--ink-sub);
+}
+
+.sched-status {
+  margin: 14px 0 0;
+  font-size: 13px;
+  color: var(--accent);
+}
+
+.sched-status.warn {
+  color: #d9480f;
+}
+
+.sched-help {
+  margin: 10px 0 0;
+  line-height: 1.6;
 }
