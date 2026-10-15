@@ -257,6 +257,12 @@ ul {
   justify-content: center;
   border-radius: 999px;
   background: var(--bg);
+  color: var(--ink);
+}
+
+.round-btn:hover,
+.close-btn:hover {
+  color: var(--accent);
 }
 
 .cal-title {
@@ -335,7 +341,6 @@ ul {
   .round-btn {
     width: 40px;
     height: 40px;
-    font-size: 18px;
   }
   .cal-title {
     font-size: 22px;
@@ -480,17 +485,35 @@ ul {
   gap: 6px;
 }
 
+.in-item {
+  border-radius: 10px;
+  background: var(--paper);
+}
+
+.in-item.editing {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
 .in-row {
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-  border-radius: 10px;
-  background: var(--paper);
   padding: 8px 10px;
+  text-align: left;
 }
 
-.in-row.new {
+.in-edit {
+  padding: 0 10px 10px;
+}
+
+.in-edit .field,
+.in-edit .btn-ghost {
+  background: var(--bg);
+}
+
+.in-item.new {
   animation: pop-in 0.25s ease;
 }
 
@@ -503,7 +526,7 @@ ul {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .in-row.new {
+  .in-item.new {
     animation: none;
   }
 }
@@ -535,7 +558,7 @@ ul {
   justify-content: center;
   border-radius: 999px;
   background: var(--paper);
-  color: var(--ink-sub);
+  color: var(--ink);
 }
 
 .staff {
@@ -603,7 +626,8 @@ ul {
   gap: 6px;
 }
 
-.edit-row {
+.edit-row,
+.in-edit .edit-row {
   margin-bottom: 8px;
   display: flex;
   align-items: center;
@@ -615,7 +639,8 @@ ul {
   background: var(--paper);
 }
 
-.staff .field.time {
+.staff .field.time,
+.in-edit .field.time {
   flex: 1;
   min-width: 0;
   width: auto;
@@ -824,8 +849,19 @@ ul {
 }
 
 .field.time {
-  width: 104px;
+  width: 72px;
   padding: 6px 8px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.field::placeholder {
+  color: var(--ink-sub);
+  opacity: 0.7;
+}
+
+.field.invalid {
+  box-shadow: inset 0 0 0 1.5px var(--red);
 }
 
 .time-cell {

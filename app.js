@@ -206,6 +206,39 @@ function esc(s) {
 const app = document.getElementById("app");
 const isDesktop = () => window.matchMedia("(min-width: 768px)").matches;
 
+// ---------- 아이콘 ----------
+
+const svg = (size, d, stroke = 2.25) =>
+  `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const ICON_PREV = svg(22, '<path d="m15 18-6-6 6-6"/>');
+const ICON_NEXT = svg(22, '<path d="m9 18 6-6-6-6"/>');
+const ICON_CLOSE = svg(18, '<path d="M18 6 6 18M6 6l12 12"/>', 2.5);
+
+// ---------- 시간 입력 ----------
+// 시계/드롭다운 없이 키보드로 입력: "0930", "930", "9" 모두 "09:30"/"09:00" 으로 맞춘다.
+
+function normalizeTime(text) {
+  const digits = String(text).replace(/\D/g, "");
+  if (!digits) return null;
+  let hh, mm;
+  if (digits.length <= 2) [hh, mm] = [digits, "00"];
+  else if (digits.length === 3) [hh, mm] = [digits.slice(0, 1), digits.slice(1)];
+  else [hh, mm] = [digits.slice(0, 2), digits.slice(2, 4)];
+  if (Number(hh) > 23 || Number(mm) > 59) return null;
+  return `${hh.padStart(2, "0")}:${mm}`;
+}
+
+// 비워 두면 placeholder(기존 시간)를 그대로 쓴다. 형식이 틀리면 null.
+function readTime(id) {
+  const el = document.getElementById(id);
+  if (!el.value.trim()) return el.placeholder;
+  return normalizeTime(el.value);
+}
+
+function timeInput(id, placeholder, label, extra = "") {
+  return `<input id="${id}" class="field time" type="text" inputmode="numeric" maxlength="5" autocomplete="off" placeholder="${placeholder}" aria-label="${label}"${extra} />`;
+}
+
 // ---------- 상태 ----------
 
 const state = {
@@ -215,6 +248,7 @@ const state = {
   animateOpen: false,
   expandedId: null, // 이름을 눌러 출근/수정 버튼이 펼쳐진 직원
   editingId: null, // 근무 시간을 수정 중인 직원
+  editingWhere: null, // "staff"(근무자 목록) 또는 "box"(날짜 박스)
   adding: false, // + 로 일정에 없던 인원 등록 중
   justAddedId: null, // 방금 출근한 기록 (날짜 박스에서 한 번만 애니메이션)
   unlockOpen: false,
@@ -290,9 +324,9 @@ function renderCalendar() {
 
   return `
     <div class="cal-head">
-      <button type="button" class="round-btn" data-action="prev-month" aria-label="이전 달">‹</button>
+      <button type="button" class="round-btn" data-action="prev-month" aria-label="이전 달">${ICON_PREV}</button>
       <p class="cal-title">${year}년 ${month}월</p>
-      <button type="button" class="round-btn" data-action="next-month" aria-label="다음 달">›</button>
+      <button type="button" class="round-btn" data-action="next-month" aria-label="다음 달">${ICON_NEXT}</button>
     </div>
     <div class="grid">
       ${WEEKDAYS.map((w, i) => `<div class="weekday${i === 0 ? " rest" : ""}">${w}</div>`).join("")}
@@ -308,14 +342,20 @@ function renderDateBox(date, { closable }) {
   const isRest = wd === 0 || Boolean(holiday);
   const records = recordsOn(date);
 
+  const editable = date >= todayDateString();
   const rows = records
-    .map(
-      (r) => `
-        <li class="in-row${r.id === state.justAddedId ? " new" : ""}">
-          <span class="in-name">${esc(employeeById(r.employeeId).name)}</span>
-          <span class="in-time">${formatTime(r.clockIn)} 출근</span>
-        </li>`,
-    )
+    .map((r) => {
+      const emp = employeeById(r.employeeId);
+      const editing = editable && state.editingWhere === "box" && state.editingId === emp.id;
+      return `
+        <li class="in-item${editing ? " editing" : ""}${r.id === state.justAddedId ? " new" : ""}">
+          <button type="button" class="in-row" data-action="edit-record" data-id="${emp.id}"${editable ? "" : " disabled"}>
+            <span class="in-name">${esc(emp.name)}</span>
+            <span class="in-time">${formatTime(r.clockIn)} ~ ${formatTime(r.clockOut)}</span>
+          </button>
+          ${editing ? `<div class="in-edit">${renderTimeEditor(emp.id, formatTime(r.clockIn), formatTime(r.clockOut))}</div>` : ""}
+        </li>`;
+    })
     .join("");
 
   return `
@@ -326,7 +366,7 @@ function renderDateBox(date, { closable }) {
           <p class="date-box-day${isRest ? " rest" : ""}">${d}</p>
           <p class="date-box-wd${isRest ? " rest" : ""}">${WEEKDAYS[wd]}요일${holiday ? ` · ${esc(holiday)}` : ""}</p>
         </div>
-        ${closable ? `<button type="button" class="close-btn" data-action="close-panel" aria-label="닫기">×</button>` : ""}
+        ${closable ? `<button type="button" class="close-btn" data-action="close-panel" aria-label="닫기">${ICON_CLOSE}</button>` : ""}
       </div>
       <p class="box-label">출근 ${records.length}명</p>
       <ul class="in-list">
@@ -345,17 +385,8 @@ function renderStaffItem(emp, date) {
   const expanded = editable && state.expandedId === emp.id;
 
   let action = "";
-  if (expanded && state.editingId === emp.id) {
-    action = `
-      <div class="edit-row">
-        <input id="edit-start" class="field time" type="time" value="${start}" aria-label="시작 시간" />
-        <span>~</span>
-        <input id="edit-end" class="field time" type="time" value="${end}" aria-label="종료 시간" />
-      </div>
-      <div class="action-row">
-        <button type="button" class="btn-primary" data-action="save-shift" data-id="${emp.id}">저장</button>
-        <button type="button" class="btn-ghost" data-action="cancel-edit">취소</button>
-      </div>`;
+  if (expanded && state.editingWhere === "staff" && state.editingId === emp.id) {
+    action = renderTimeEditor(emp.id, start, end);
   } else if (expanded) {
     action = `
       <div class="action-row">
@@ -363,7 +394,7 @@ function renderStaffItem(emp, date) {
         <button type="button" class="btn-ghost" data-action="edit-shift" data-id="${emp.id}">수정</button>
       </div>`;
   }
-  if (expanded && state.error) action += `<p class="error">${esc(state.error)}</p>`;
+  if (expanded && state.error && state.editingWhere !== "staff") action += `<p class="error">${esc(state.error)}</p>`;
 
   return `
     <li class="staff-item${expanded ? " expanded" : ""}">
@@ -376,6 +407,21 @@ function renderStaffItem(emp, date) {
     </li>`;
 }
 
+// 시간 수정 칸 (근무자 목록·날짜 박스 공용). 비워 두면 기존 시간 유지.
+function renderTimeEditor(empId, start, end) {
+  return `
+    <div class="edit-row">
+      ${timeInput("edit-start", start, "시작 시간")}
+      <span>~</span>
+      ${timeInput("edit-end", end, "종료 시간")}
+    </div>
+    <div class="action-row">
+      <button type="button" class="btn-primary" data-action="save-shift" data-id="${empId}">저장</button>
+      <button type="button" class="btn-ghost" data-action="cancel-edit">취소</button>
+    </div>
+    ${state.error ? `<p class="error">${esc(state.error)}</p>` : ""}`;
+}
+
 function renderAddExtra() {
   if (!state.adding) {
     return `<button type="button" class="add-btn" data-action="open-add" aria-label="근무자 추가">+</button>`;
@@ -384,9 +430,9 @@ function renderAddExtra() {
     <form class="add-form" id="add-extra">
       <input id="extra-name" class="field" placeholder="이름" required autocomplete="off" />
       <div class="edit-row">
-        <input id="extra-start" class="field time" type="time" value="09:00" required aria-label="시작 시간" />
+        ${timeInput("extra-start", "09:00", "시작 시간")}
         <span>~</span>
-        <input id="extra-end" class="field time" type="time" value="18:00" required aria-label="종료 시간" />
+        ${timeInput("extra-end", "18:00", "종료 시간")}
       </div>
       <div class="action-row">
         <button type="submit" class="btn-primary">등록</button>
@@ -441,7 +487,7 @@ function renderDayPage(date) {
   return `
     <div class="day-page">
       <div class="day-page-inner">
-        <button type="button" class="round-btn back-btn" data-action="go-home" aria-label="달력으로 돌아가기">‹</button>
+        <button type="button" class="round-btn back-btn" data-action="go-home" aria-label="달력으로 돌아가기">${ICON_PREV}</button>
         ${renderDayArea(date, { closable: false })}
       </div>
     </div>`;
@@ -485,9 +531,9 @@ function renderEmployees() {
         <td class="name">${esc(e.name)}<div class="muted small">${esc(e.phone || "")}</div></td>
         <td>${dayToggles(e.days, e.id)}</td>
         <td class="time-cell">
-          <input class="field time" type="time" value="${e.start}" data-time="start" data-id="${e.id}" aria-label="${esc(e.name)} 시작 시간" />
+          <input class="field time" type="text" inputmode="numeric" maxlength="5" placeholder="09:00" value="${e.start}" data-time="start" data-id="${e.id}" aria-label="${esc(e.name)} 시작 시간" />
           ~
-          <input class="field time" type="time" value="${e.end}" data-time="end" data-id="${e.id}" aria-label="${esc(e.name)} 종료 시간" />
+          <input class="field time" type="text" inputmode="numeric" maxlength="5" placeholder="18:00" value="${e.end}" data-time="end" data-id="${e.id}" aria-label="${esc(e.name)} 종료 시간" />
         </td>
         <td><input class="field" style="width:96px;padding:4px 8px" type="number" value="${e.hourlyWage}" data-wage="${e.id}" aria-label="${esc(e.name)} 시급" /></td>
         <td><button type="button" class="status${e.active ? " on" : ""}" data-action="toggle-active" data-id="${e.id}">${e.active ? "재직중" : "비활성"}</button></td>
@@ -506,8 +552,8 @@ function renderEmployees() {
       <div><label>근무 요일</label>${dayToggles(newEmployeeDays)}</div>
       <div>
         <label for="f-start">근무 시간</label>
-        <input id="f-start" class="field time" type="time" value="09:00" required /> ~
-        <input id="f-end" class="field time" type="time" value="18:00" required aria-label="종료 시간" />
+        ${timeInput("f-start", "09:00", "시작 시간")} ~
+        ${timeInput("f-end", "18:00", "종료 시간")}
       </div>
       <div><label for="f-wage">시급(원)</label><input id="f-wage" class="field" style="width:112px" type="number" value="10030" required /></div>
       <button type="submit" class="pill">추가</button>
@@ -662,6 +708,7 @@ function resetDayUi() {
   state.error = "";
   state.expandedId = null;
   state.editingId = null;
+  state.editingWhere = null;
   state.adding = false;
 }
 
@@ -739,15 +786,27 @@ app.addEventListener("click", (e) => {
     case "edit-shift":
       state.error = "";
       state.editingId = id;
+      state.editingWhere = "staff";
       break;
+    case "edit-record": {
+      // 날짜 박스에서 이름을 누르면 그 자리에서 시간 수정 (다시 누르면 닫기)
+      const same = state.editingWhere === "box" && state.editingId === id;
+      state.error = "";
+      state.expandedId = null;
+      state.editingId = same ? null : id;
+      state.editingWhere = same ? null : "box";
+      break;
+    }
     case "cancel-edit":
+      state.error = "";
       state.editingId = null;
+      state.editingWhere = null;
       break;
     case "save-shift": {
-      const start = document.getElementById("edit-start").value;
-      const end = document.getElementById("edit-end").value;
+      const start = readTime("edit-start");
+      const end = readTime("edit-end");
       if (!start || !end) {
-        state.error = "시간을 입력해주세요.";
+        state.error = "시간은 09:00 처럼 숫자로 입력해주세요.";
         break;
       }
       const date = activeDate();
@@ -762,6 +821,7 @@ app.addEventListener("click", (e) => {
       save();
       state.error = "";
       state.editingId = null;
+      state.editingWhere = null;
       break;
     }
     case "open-add":
@@ -865,8 +925,8 @@ app.addEventListener("submit", (e) => {
   const name = document.getElementById("f-name").value.trim();
   const phone = document.getElementById("f-phone").value.trim();
   const wage = Number(document.getElementById("f-wage").value);
-  const start = document.getElementById("f-start").value || "09:00";
-  const end = document.getElementById("f-end").value || "18:00";
+  const start = readTime("f-start") ?? "09:00";
+  const end = readTime("f-end") ?? "18:00";
   if (!name) return;
   store.employees.push({
     id: uid(),
@@ -892,9 +952,14 @@ app.addEventListener("change", (e) => {
     }
     return;
   }
-  if (t.dataset.time && t.value) {
-    employeeById(t.dataset.id)[t.dataset.time] = t.value;
-    save();
+  if (t.dataset.time) {
+    const emp = employeeById(t.dataset.id);
+    const value = normalizeTime(t.value);
+    if (value) {
+      emp[t.dataset.time] = value;
+      save();
+    }
+    t.value = emp[t.dataset.time];
     return;
   }
   const filter = t.dataset.filter;
@@ -907,9 +972,13 @@ app.addEventListener("change", (e) => {
 // + 로 일정에 없던 인원을 그날 근무자로 등록. 처음 보는 이름이면 직원으로도 추가된다.
 function addExtra() {
   const name = document.getElementById("extra-name").value.trim();
-  const start = document.getElementById("extra-start").value;
-  const end = document.getElementById("extra-end").value;
-  if (!name || !start || !end) return;
+  const start = readTime("extra-start");
+  const end = readTime("extra-end");
+  if (!name) return;
+  if (!start || !end) {
+    alertField("extra-start");
+    return;
+  }
   let emp = store.employees.find((x) => x.active && x.name === name);
   if (!emp) {
     emp = { id: uid(), name, phone: null, hourlyWage: 10030, active: true, start, end, days: [] };
@@ -921,6 +990,21 @@ function addExtra() {
   state.expandedId = emp.id; // 바로 출근할 수 있게 펼쳐 둔다
   render();
 }
+
+function alertField(id) {
+  const el = document.getElementById(id);
+  el.classList.add("invalid");
+  el.focus();
+}
+
+// 숫자만 남기고 두 자리 뒤에 ":" 를 자동으로 넣는다
+app.addEventListener("input", (e) => {
+  const t = e.target;
+  if (!t.classList.contains("time")) return;
+  t.classList.remove("invalid");
+  const digits = t.value.replace(/\D/g, "").slice(0, 4);
+  t.value = digits.length > 2 ? `${digits.slice(0, 2)}:${digits.slice(2)}` : digits;
+});
 
 function exportCsv() {
   const { from, to } = state.records;
