@@ -7,9 +7,9 @@
   --accent: #3182f6;
   --accent-soft: #3182f61a;
   --red: #ef4444;
-  --card-w: min(1320px, calc(100vw - 48px));
+  --card-w: min(1480px, calc(100vw - 48px));
   /* 달력 한 칸 높이: 화면 높이에 맞춰 달력 전체가 한 화면에 들어오도록 */
-  --cell-h: clamp(4rem, calc((100vh - 290px) / 6), 9rem);
+  --cell-h: clamp(4rem, calc((100vh - 268px) / 6), 10rem);
   color-scheme: light;
 }
 
@@ -398,6 +398,11 @@ ul {
   color: var(--red);
 }
 
+/* 펼쳤을 때는 달력이 좁으니 공휴일 이름은 숨김 (날짜 박스에 표시됨) */
+.card.open .chip.holiday {
+  display: none;
+}
+
 .chip.more {
   color: var(--accent);
   font-weight: 600;
@@ -407,7 +412,7 @@ ul {
 .day-area-inner {
   height: 100%;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
   gap: 12px;
   padding: 20px;
 }
@@ -483,6 +488,9 @@ ul {
   border-radius: 10px;
   background: var(--paper);
   padding: 8px 10px;
+}
+
+.in-row.new {
   animation: pop-in 0.25s ease;
 }
 
@@ -495,7 +503,7 @@ ul {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .in-row {
+  .in-row.new {
     animation: none;
   }
 }
@@ -566,9 +574,10 @@ ul {
 .staff-name-btn {
   width: 100%;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  padding: 12px;
+  gap: 2px 8px;
+  padding: 10px 12px;
   text-align: left;
 }
 
@@ -578,7 +587,7 @@ ul {
 }
 
 .staff-time {
-  flex: 1;
+  flex-basis: 100%;
   font-size: 12px;
   color: var(--ink-sub);
   font-variant-numeric: tabular-nums;
@@ -588,13 +597,67 @@ ul {
   padding: 0 12px 12px;
 }
 
-.others-toggle {
-  margin-top: 12px;
-  align-self: flex-start;
-  font-size: 12px;
-  font-weight: 600;
+.action-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.edit-row {
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   color: var(--ink-sub);
-  text-decoration: underline;
+}
+
+.staff .field {
+  background: var(--paper);
+}
+
+.staff .field.time {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+
+.btn-ghost {
+  border-radius: 999px;
+  background: var(--paper);
+  padding: 10px 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.add-btn {
+  margin-top: 6px;
+  width: 100%;
+  height: 44px;
+  border: 1.5px dashed var(--line);
+  border-radius: 12px;
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--ink-sub);
+}
+
+.add-btn:hover {
+  border-color: var(--ink-sub);
+  color: var(--ink);
+}
+
+.add-form {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-radius: 12px;
+  background: var(--bg);
+  padding: 12px;
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+.add-form .edit-row {
+  margin-bottom: 0;
 }
 
 .badge {
@@ -672,16 +735,7 @@ ul {
   padding: 4px 0;
 }
 
-.day-page .staff-name-btn {
-  flex-wrap: wrap;
-  row-gap: 2px;
-  padding: 10px;
-}
 
-.day-page .staff-time {
-  flex-basis: 100%;
-  order: 3;
-}
 
 /* ---------- 관리자 ---------- */
 .admin-header {

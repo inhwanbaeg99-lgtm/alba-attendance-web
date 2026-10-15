@@ -75,6 +75,11 @@ function kstIso(dateStr, hhmm) {
   return new Date(`${dateStr}T${hhmm}:00+09:00`).toISOString();
 }
 
+// 근무 종료 시각 (종료가 시작보다 이르면 자정을 넘긴 것으로 본다)
+function endIso(date, start, end) {
+  return kstIso(end > start ? date : addDays(date, 1), end);
+}
+
 function addDays(dateStr, n) {
   const [y, m, d] = dateStr.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
@@ -99,20 +104,20 @@ function sampleData() {
     for (const e of employees) {
       if (!e.days.includes(weekdayOf(date))) continue;
       const clockIn = kstIso(date, e.start);
-      records.push({ id: uid(), employeeId: e.id, date, clockIn, clockOut: scheduledEnd(e, date), createdAt: clockIn });
+      records.push({ id: uid(), employeeId: e.id, date, clockIn, clockOut: endIso(date, e.start, e.end), createdAt: clockIn });
     }
   }
   // 오늘 이미 출근한 직원 한 명
   const first = employees.find((e) => e.days.includes(weekdayOf(today))) ?? employees[0];
   const startedAt = kstIso(today, first.start);
-  records.push({ id: uid(), employeeId: first.id, date: today, clockIn: startedAt, clockOut: scheduledEnd(first, today), createdAt: startedAt });
-  return { employees, records };
+  records.push({ id: uid(), employeeId: first.id, date: today, clockIn: startedAt, clockOut: endIso(today, first.start, first.end), createdAt: startedAt });
+  return { employees, records, shifts: {} };
 }
 
 function loadStore() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) return { shifts: {}, ...JSON.parse(raw) };
   } catch {}
   return sampleData();
 }
@@ -141,16 +146,28 @@ function recordFor(employeeId, date) {
   return store.records.find((r) => r.employeeId === employeeId && r.date === date);
 }
 
-function scheduledOn(date) {
-  const wd = weekdayOf(date);
-  return store.employees
-    .filter((e) => e.active && e.days.includes(wd))
-    .sort((a, b) => (a.start < b.start ? -1 : 1));
+// 그날의 근무 시간: 날짜별로 수정한 시간(store.shifts)이 있으면 그것, 없으면 직원 기본 시간
+function shiftFor(emp, date) {
+  return store.shifts[date]?.[emp.id] ?? { start: emp.start, end: emp.end };
 }
 
-// 퇴근은 따로 누르지 않으므로, 퇴근 시각은 직원의 근무 종료 시간으로 본다 (자정을 넘기면 다음 날)
+function setShift(empId, date, start, end) {
+  store.shifts[date] = { ...store.shifts[date], [empId]: { start, end } };
+}
+
+// 근무 요일에 해당하는 직원 + 그날만 추가로 등록된 직원
+function scheduledOn(date) {
+  const wd = weekdayOf(date);
+  const extra = store.shifts[date] ?? {};
+  return store.employees
+    .filter((e) => e.active && (e.days.includes(wd) || extra[e.id]))
+    .sort((a, b) => (shiftFor(a, date).start < shiftFor(b, date).start ? -1 : 1));
+}
+
+// 퇴근은 따로 누르지 않으므로, 퇴근 시각은 그날 근무 종료 시간으로 본다 (자정을 넘기면 다음 날)
 function scheduledEnd(emp, date) {
-  return kstIso(emp.end > emp.start ? date : addDays(date, 1), emp.end);
+  const { start, end } = shiftFor(emp, date);
+  return endIso(date, start, end);
 }
 
 function clockIn(employeeId) {
@@ -196,8 +213,10 @@ const state = {
   month: 0,
   selectedDate: null,
   animateOpen: false,
-  expandedId: null, // 이름을 눌러 출근/퇴근 버튼이 펼쳐진 직원
-  showOthers: false, // 근무 예정이 아닌 직원 목록 펼침
+  expandedId: null, // 이름을 눌러 출근/수정 버튼이 펼쳐진 직원
+  editingId: null, // 근무 시간을 수정 중인 직원
+  adding: false, // + 로 일정에 없던 인원 등록 중
+  justAddedId: null, // 방금 출근한 기록 (날짜 박스에서 한 번만 애니메이션)
   unlockOpen: false,
   pin: "",
   error: "",
@@ -292,7 +311,7 @@ function renderDateBox(date, { closable }) {
   const rows = records
     .map(
       (r) => `
-        <li class="in-row">
+        <li class="in-row${r.id === state.justAddedId ? " new" : ""}">
           <span class="in-name">${esc(employeeById(r.employeeId).name)}</span>
           <span class="in-time">${formatTime(r.clockIn)} 출근</span>
         </li>`,
@@ -316,48 +335,81 @@ function renderDateBox(date, { closable }) {
     </section>`;
 }
 
-function renderStaffItem(emp, date, isToday) {
+function renderStaffItem(emp, date) {
+  const today = todayDateString();
+  const isToday = date === today;
+  const editable = date >= today;
   const rec = recordFor(emp.id, date);
   const done = Boolean(rec?.clockIn);
-  const expanded = state.expandedId === emp.id && isToday && !done;
+  const { start, end } = shiftFor(emp, date);
+  const expanded = editable && state.expandedId === emp.id;
 
   let action = "";
-  if (expanded) {
-    action = `<button type="button" class="btn-primary" data-action="clock-in" data-id="${emp.id}">출근</button>`;
-    if (state.error) action += `<p class="error">${esc(state.error)}</p>`;
+  if (expanded && state.editingId === emp.id) {
+    action = `
+      <div class="edit-row">
+        <input id="edit-start" class="field time" type="time" value="${start}" aria-label="시작 시간" />
+        <span>~</span>
+        <input id="edit-end" class="field time" type="time" value="${end}" aria-label="종료 시간" />
+      </div>
+      <div class="action-row">
+        <button type="button" class="btn-primary" data-action="save-shift" data-id="${emp.id}">저장</button>
+        <button type="button" class="btn-ghost" data-action="cancel-edit">취소</button>
+      </div>`;
+  } else if (expanded) {
+    action = `
+      <div class="action-row">
+        ${isToday && !done ? `<button type="button" class="btn-primary" data-action="clock-in" data-id="${emp.id}">출근</button>` : ""}
+        <button type="button" class="btn-ghost" data-action="edit-shift" data-id="${emp.id}">수정</button>
+      </div>`;
   }
+  if (expanded && state.error) action += `<p class="error">${esc(state.error)}</p>`;
 
   return `
     <li class="staff-item${expanded ? " expanded" : ""}">
-      <button type="button" class="staff-name-btn" data-action="toggle-staff" data-id="${emp.id}"${isToday && !done ? "" : " disabled"}>
+      <button type="button" class="staff-name-btn" data-action="toggle-staff" data-id="${emp.id}"${editable ? "" : " disabled"}>
         <span class="staff-name">${esc(emp.name)}</span>
-        <span class="staff-time">${emp.start} ~ ${emp.end}</span>
         ${done ? `<span class="badge done">출근 완료</span>` : ""}
+        <span class="staff-time">${start} ~ ${end}</span>
       </button>
       ${action ? `<div class="staff-action">${action}</div>` : ""}
     </li>`;
 }
 
+function renderAddExtra() {
+  if (!state.adding) {
+    return `<button type="button" class="add-btn" data-action="open-add" aria-label="근무자 추가">+</button>`;
+  }
+  return `
+    <form class="add-form" id="add-extra">
+      <input id="extra-name" class="field" placeholder="이름" required autocomplete="off" />
+      <div class="edit-row">
+        <input id="extra-start" class="field time" type="time" value="09:00" required aria-label="시작 시간" />
+        <span>~</span>
+        <input id="extra-end" class="field time" type="time" value="18:00" required aria-label="종료 시간" />
+      </div>
+      <div class="action-row">
+        <button type="submit" class="btn-primary">등록</button>
+        <button type="button" class="btn-ghost" data-action="cancel-add">취소</button>
+      </div>
+    </form>`;
+}
+
 // 근무자 목록: 그날 근무 예정인 직원과 시간
 function renderStaff(date) {
-  const isToday = date === todayDateString();
+  const today = todayDateString();
+  const isToday = date === today;
   const scheduled = scheduledOn(date);
-  const scheduledIds = new Set(scheduled.map((e) => e.id));
-  const others = store.employees.filter((e) => e.active && !scheduledIds.has(e.id));
+  const sub = isToday ? "본인 이름을 눌러 출근하세요" : date > today ? "이름을 눌러 시간을 수정할 수 있어요" : "지난 날짜예요";
 
   return `
     <section class="staff" aria-label="근무자">
       <p class="staff-title">${isToday ? "오늘 근무자" : "근무 예정"}</p>
-      <p class="sub">${isToday ? "본인 이름을 눌러 출근하세요" : "출퇴근은 오늘 날짜에서만 할 수 있어요"}</p>
+      <p class="sub">${sub}</p>
       <ul class="staff-list">
-        ${scheduled.map((e) => renderStaffItem(e, date, isToday)).join("") || `<li class="in-empty">근무 예정인 직원이 없어요</li>`}
+        ${scheduled.map((e) => renderStaffItem(e, date)).join("") || `<li class="in-empty">근무 예정인 직원이 없어요</li>`}
       </ul>
-      ${
-        isToday && others.length
-          ? `<button type="button" class="others-toggle" data-action="toggle-others">${state.showOthers ? "다른 직원 숨기기" : `다른 직원 (${others.length})`}</button>
-             ${state.showOthers ? `<ul class="staff-list">${others.map((e) => renderStaffItem(e, date, isToday)).join("")}</ul>` : ""}`
-          : ""
-      }
+      ${date >= today ? renderAddExtra() : ""}
     </section>`;
 }
 
@@ -568,9 +620,7 @@ function navigate(hash) {
 }
 
 window.addEventListener("hashchange", () => {
-  state.error = "";
-  state.expandedId = null;
-  state.showOthers = false;
+  resetDayUi();
   state.unlockOpen = false;
   state.pin = "";
   render();
@@ -603,10 +653,20 @@ function enterKey(key) {
 
 // ---------- 이벤트 ----------
 
-function selectDate(date) {
+function activeDate() {
+  const r = route();
+  return r.name === "day" ? r.date : state.selectedDate;
+}
+
+function resetDayUi() {
   state.error = "";
   state.expandedId = null;
-  state.showOthers = false;
+  state.editingId = null;
+  state.adding = false;
+}
+
+function selectDate(date) {
+  resetDayUi();
   if (!isDesktop()) {
     navigate(`#/day/${date}`);
     return;
@@ -673,14 +733,53 @@ app.addEventListener("click", (e) => {
       return;
     case "toggle-staff":
       state.error = "";
+      state.editingId = null;
       state.expandedId = state.expandedId === id ? null : id;
       break;
-    case "toggle-others":
-      state.showOthers = !state.showOthers;
+    case "edit-shift":
+      state.error = "";
+      state.editingId = id;
+      break;
+    case "cancel-edit":
+      state.editingId = null;
+      break;
+    case "save-shift": {
+      const start = document.getElementById("edit-start").value;
+      const end = document.getElementById("edit-end").value;
+      if (!start || !end) {
+        state.error = "시간을 입력해주세요.";
+        break;
+      }
+      const date = activeDate();
+      const emp = employeeById(id);
+      setShift(id, date, start, end);
+      // 이미 출근했다면 기록 시간도 함께 고친다
+      const rec = recordFor(id, date);
+      if (rec) {
+        rec.clockIn = kstIso(date, start);
+        rec.clockOut = scheduledEnd(emp, date);
+      }
+      save();
+      state.error = "";
+      state.editingId = null;
+      break;
+    }
+    case "open-add":
+      state.adding = true;
+      state.expandedId = null;
+      break;
+    case "cancel-add":
+      state.adding = false;
       break;
     case "clock-in":
       state.error = clockIn(id) || "";
-      if (!state.error) state.expandedId = null;
+      if (!state.error) {
+        state.expandedId = null;
+        state.justAddedId = recordFor(id, todayDateString()).id;
+        render();
+        state.justAddedId = null;
+        return;
+      }
       break;
     case "logout":
       setAdmin(false);
@@ -756,6 +855,11 @@ app.addEventListener("pointerdown", (e) => {
 });
 
 app.addEventListener("submit", (e) => {
+  if (e.target.id === "add-extra") {
+    e.preventDefault();
+    addExtra();
+    return;
+  }
   if (e.target.id !== "add-employee") return;
   e.preventDefault();
   const name = document.getElementById("f-name").value.trim();
@@ -799,6 +903,24 @@ app.addEventListener("change", (e) => {
     render();
   }
 });
+
+// + 로 일정에 없던 인원을 그날 근무자로 등록. 처음 보는 이름이면 직원으로도 추가된다.
+function addExtra() {
+  const name = document.getElementById("extra-name").value.trim();
+  const start = document.getElementById("extra-start").value;
+  const end = document.getElementById("extra-end").value;
+  if (!name || !start || !end) return;
+  let emp = store.employees.find((x) => x.active && x.name === name);
+  if (!emp) {
+    emp = { id: uid(), name, phone: null, hourlyWage: 10030, active: true, start, end, days: [] };
+    store.employees.push(emp);
+  }
+  setShift(emp.id, activeDate(), start, end);
+  save();
+  state.adding = false;
+  state.expandedId = emp.id; // 바로 출근할 수 있게 펼쳐 둔다
+  render();
+}
 
 function exportCsv() {
   const { from, to } = state.records;
