@@ -9,7 +9,8 @@
   --red: #ef4444;
   --card-w: min(1480px, calc(100vw - 48px));
   /* 달력 한 칸 높이: 화면 높이에 맞춰 달력 전체가 한 화면에 들어오도록 */
-  --cell-h: clamp(4rem, calc((100vh - 268px) / 6), 10rem);
+  /* 최소 높이: 날짜 + 이름 4줄이 잘리지 않는 높이 */
+  --cell-h: clamp(6rem, calc((100vh - 268px) / 6), 10rem);
   color-scheme: light;
 }
 
@@ -300,7 +301,16 @@ ul {
   transition: background-color 0.15s, border-color 0.15s;
 }
 
+.cell-top {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  max-width: 100%;
+}
+
 .day-num {
+  flex-shrink: 0;
   width: 40px;
   height: 40px;
   display: flex;
@@ -357,8 +367,8 @@ ul {
   }
   .cell {
     overflow: hidden;
-    gap: 3px;
-    padding: 6px;
+    gap: 2px;
+    padding: 4px;
     border: 1px solid transparent;
   }
   .cell:hover {
@@ -370,9 +380,8 @@ ul {
     background: var(--accent-soft);
   }
   .day-num {
-    width: 30px;
-    height: 30px;
-    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
     font-size: 15px;
   }
   .dot {
@@ -381,7 +390,7 @@ ul {
   .entries {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 0;
     width: 100%;
     min-height: 0;
   }
@@ -395,12 +404,23 @@ ul {
   padding: 0 4px;
   font-size: 12px;
   font-weight: 500;
-  line-height: 1.35;
+  line-height: 1.22;
   color: var(--ink);
 }
 
 .chip.holiday {
+  flex-shrink: 1;
+  min-width: 0;
+  padding: 0;
+  font-size: 11px;
   color: var(--red);
+}
+
+/* 모바일 칸에서는 공휴일 이름 생략 (빨간 날짜로 표시) */
+@media (max-width: 767px) {
+  .chip.holiday {
+    display: none;
+  }
 }
 
 /* 펼쳤을 때는 달력이 좁으니 공휴일 이름은 숨김 (날짜 박스에 표시됨) */

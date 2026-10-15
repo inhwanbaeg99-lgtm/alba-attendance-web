@@ -3,11 +3,11 @@
 
 const TIME_ZONE = "Asia/Seoul";
 const ADMIN_PIN = "1234";
-const STORE_KEY = "alba-attendance:v4";
+const STORE_KEY = "alba-attendance:v5";
 const DEFAULT_WAGE = 10320; // 2026년 최저시급
 const ADMIN_KEY = "alba-attendance:admin";
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
-const MAX_VISIBLE = 3;
+const MAX_VISIBLE = 5;
 const PIN_LENGTH = 4;
 const PANEL_ANIM_MS = 320;
 
@@ -114,7 +114,18 @@ function initialData() {
     active: true,
     weekly: Object.fromEntries(Object.entries(days).map(([wd, range]) => [wd, parseRange(range)])),
   }));
-  return { employees, records: [], shifts: {} };
+  // 이번 달 1일부터 어제까지는 근무표대로 출근한 것으로 채워 둔다
+  const records = [];
+  const today = todayDateString();
+  for (let date = `${today.slice(0, 7)}-01`; date < today; date = addDays(date, 1)) {
+    for (const e of employees) {
+      const shift = e.weekly[weekdayOf(date)];
+      if (!shift) continue;
+      const clockIn = kstIso(date, shift.start);
+      records.push({ id: uid(), employeeId: e.id, date, clockIn, clockOut: endIso(date, shift.start, shift.end), createdAt: clockIn });
+    }
+  }
+  return { employees, records, shifts: {} };
 }
 
 function loadStore() {
@@ -323,13 +334,15 @@ function renderCalendar() {
       const isRest = i % 7 === 0 || Boolean(holiday);
       const numClass = date === today ? "today" : isRest ? "rest" : "";
       const chips = [
-        holiday ? `<span class="chip holiday">${esc(holiday)}</span>` : "",
         ...entries.slice(0, MAX_VISIBLE).map((r) => `<span class="chip">${esc(employeeById(r.employeeId).name)}</span>`),
         entries.length > MAX_VISIBLE ? `<span class="chip more">+${entries.length - MAX_VISIBLE}명</span>` : "",
       ].join("");
       return `
         <button type="button" class="cell${date === selectedDate ? " selected" : ""}" data-date="${date}">
-          <span class="day-num ${numClass}">${Number(date.slice(-2))}</span>
+          <span class="cell-top">
+            <span class="day-num ${numClass}">${Number(date.slice(-2))}</span>
+            ${holiday ? `<span class="chip holiday">${esc(holiday)}</span>` : ""}
+          </span>
           <span class="dot${entries.length ? " on" : ""}"></span>
           <div class="entries">${chips}</div>
         </button>`;
@@ -356,20 +369,16 @@ function renderDateBox(date, { closable }) {
   const isRest = wd === 0 || Boolean(holiday);
   const records = recordsOn(date);
 
-  const editable = date >= todayDateString();
   const rows = records
-    .map((r) => {
-      const emp = employeeById(r.employeeId);
-      const editing = editable && state.editingWhere === "box" && state.editingId === emp.id;
-      return `
-        <li class="in-item${editing ? " editing" : ""}${r.id === state.justAddedId ? " new" : ""}">
-          <button type="button" class="in-row" data-action="edit-record" data-id="${emp.id}"${editable ? "" : " disabled"}>
-            <span class="in-name">${esc(emp.name)}</span>
+    .map(
+      (r) => `
+        <li class="in-item${r.id === state.justAddedId ? " new" : ""}">
+          <div class="in-row">
+            <span class="in-name">${esc(employeeById(r.employeeId).name)}</span>
             <span class="in-time">${formatTime(r.clockIn)} ~ ${formatTime(r.clockOut)}</span>
-          </button>
-          ${editing ? `<div class="in-edit">${renderTimeEditor(emp.id, formatTime(r.clockIn), formatTime(r.clockOut))}</div>` : ""}
-        </li>`;
-    })
+          </div>
+        </li>`,
+    )
     .join("");
 
   return `
@@ -788,15 +797,6 @@ app.addEventListener("click", (e) => {
       state.editingId = id;
       state.editingWhere = "staff";
       break;
-    case "edit-record": {
-      // 날짜 박스에서 이름을 누르면 그 자리에서 시간 수정 (다시 누르면 닫기)
-      const same = state.editingWhere === "box" && state.editingId === id;
-      state.error = "";
-      state.expandedId = null;
-      state.editingId = same ? null : id;
-      state.editingWhere = same ? null : "box";
-      break;
-    }
     case "cancel-edit":
       state.error = "";
       state.editingId = null;
