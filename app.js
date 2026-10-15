@@ -430,6 +430,7 @@ const state = {
   slotEdit: null, // 근무표에서 편집 중인 칸 { wd, empId, start }
   schedWork: null, // 근무표 편집 초안 (저장 전)
   allowDraft: null, // 명세서 창에서 수정 중인 수당 (저장 전)
+  helpOpen: {}, // ? 설명 펼침 상태
 };
 
 {
@@ -655,7 +656,7 @@ function renderDayPage(date) {
 
 // ---------- 화면: 관리자 ----------
 
-function renderAdminShell(active, content, { center = false } = {}) {
+function renderAdminShell(active, content, { center = false, wide = false } = {}) {
   const link = (href, label, key) => `<a href="${href}" class="${active === key ? "active" : ""}">${label}</a>`;
   return `
     <nav class="admin-top" aria-label="관리자 메뉴">
@@ -664,7 +665,17 @@ function renderAdminShell(active, content, { center = false } = {}) {
       ${link("#/admin/records", "근무 기록", "records")}
       <button type="button" data-action="logout">로그아웃</button>
     </nav>
-    <main class="admin-main${center ? " centered" : ""}">${content}</main>`;
+    <main class="admin-main${center ? " centered" : ""}${wide ? " wide" : ""}">${content}</main>`;
+}
+
+// ? 버튼을 누르면 펼쳐지는 설명 (다른 화면에 갔다 오면 다시 접힘)
+function helpToggle(key, html) {
+  const open = state.helpOpen[key];
+  return `
+    <div class="help">
+      <button type="button" class="help-btn${open ? " on" : ""}" data-action="toggle-help" data-key="${key}" aria-expanded="${open}" aria-label="설명 ${open ? "접기" : "보기"}">?</button>
+      ${open ? `<p class="help-text">${html}</p>` : ""}
+    </div>`;
 }
 
 // 010-1234-5678 형태로
@@ -999,7 +1010,7 @@ function renderRecords() {
     <div class="toolbar records-bar">
       <div class="month-nav">
         <button type="button" class="round-btn" data-action="payroll-prev" aria-label="이전 달">${ICON_PREV}</button>
-        <h2>${y}년 ${m}월 근무 기록</h2>
+        <h2>${y}년 ${m}월</h2>
         <button type="button" class="round-btn" data-action="payroll-next" aria-label="다음 달">${ICON_NEXT}</button>
       </div>
       <div>
@@ -1041,11 +1052,12 @@ function renderRecords() {
         </tbody>
       </table>
     </div>
-    <p class="hint small-hint">
-      주휴수당: 월~일 한 주에 15시간 이상 일하고 근무표상 근무일에 모두 출근하면 (주 근무시간 ÷ 40) × 8시간 × 시급. 그 주가 끝나는 일요일이 속한 달에 포함되고, 아직 끝나지 않은 주는 빠져요. 금액에 마우스를 올리면 주별 내역이 보여요.<br />
-      수당(교육수당·특근수당 등)은 이름 옆 <b>명세서</b>를 눌러 입력해요.
-      ${taxOn ? "세금: 소득세 3% + 지방소득세(소득세의 10%), 10원 미만 절사. 소득세가 1,000원 미만이면 공제하지 않아요." : "세금을 공제하지 않고 계산했어요."}
-    </p>
+    ${helpToggle(
+      "records",
+      `주휴수당: 월~일 한 주에 15시간 이상 일하고 근무표상 근무일에 모두 출근하면 (주 근무시간 ÷ 40) × 8시간 × 시급. 그 주가 끝나는 일요일이 속한 달에 포함되고, 아직 끝나지 않은 주는 빠져요. 금액에 마우스를 올리면 주별 내역이 보여요.<br />
+      수당(교육수당·특근수당 등)은 이름 옆 <b>명세서</b>를 눌러 입력해요.<br />
+      ${taxOn ? "세금: 소득세 3% + 지방소득세(소득세의 10%), 10원 미만 절사. 소득세가 1,000원 미만이면 공제하지 않아요." : "세금을 공제하지 않고 계산했어요."}`,
+    )}
     ${renderPayslipModal()}`,
   );
 }
@@ -1319,7 +1331,9 @@ function renderScheduleSheet() {
               const slot = `data-action="edit-slot" data-wd="${d.wd}" data-start="${row.start}"`;
               if (!who) return `<td class="sc-empty" ${slot}${span}></td>`;
               const bg = who.emp.color || "#ffffff";
-              return `<td class="sc-name" ${slot} data-id="${who.emp.id}"${span} style="background:${bg};color:${textOn(bg)}">${esc(who.emp.name)}</td>`;
+              const ed = state.slotEdit;
+              const editing = ed && String(ed.wd) === String(d.wd) && (ed.empId ?? ed.addEmpId) === who.emp.id;
+              return `<td class="sc-name${editing ? " sc-editing" : ""}" ${slot} data-id="${who.emp.id}"${span} style="background:${bg};color:${textOn(bg)}">${esc(who.emp.name)}</td>`;
             })
             .join(""),
         )
@@ -1356,73 +1370,125 @@ function renderScheduleSheet() {
     </div>`;
 }
 
+function renderSchedStatus() {
+  if (!hasDraft()) return "";
+  return schedDirty()
+    ? `<p class="sched-status warn">저장하지 않은 변경이 있어요. <b>저장</b>을 눌러야 직원 관리·달력·근무 기록에 반영돼요.</p>`
+    : `<p class="sched-status">임시저장된 변경이 있어요. <b>저장</b>을 누르면 반영돼요.</p>`;
+}
+
 function renderSchedule() {
-  const status = !hasDraft()
-    ? ""
-    : schedDirty()
-      ? `<p class="sched-status warn">저장하지 않은 변경이 있어요. <b>저장</b>을 눌러야 직원 관리·달력·근무 기록에 반영돼요.</p>`
-      : `<p class="sched-status">임시저장된 변경이 있어요. <b>저장</b>을 누르면 반영돼요.</p>`;
   return renderAdminShell(
     "schedule",
     `
-    <div class="sched-scroll">${renderScheduleSheet()}</div>
-    ${status}
-    <p class="hint sched-help">
-      이름 칸을 누르면 시간 수정·삭제, 빈 칸(사선)을 누르면 근무자 추가예요. <b>저장</b>하면 직원 관리·달력·근무 기록에 반영되고, <b>임시저장</b>은 반영하지 않고 고친 내용만 보관해요.<br />
-      지난 근무 기록은 제목 기간의 시작일(<b>${shortDate(scheduleStart())}</b>)부터 바뀌어요. 제목의 기간과 비고 칸도 눌러서 고칠 수 있어요.
-    </p>
-    ${renderSlotEditor()}`,
-    { center: true },
+    <div class="sched-layout">
+      <div class="sched-main">
+        <div class="sched-scroll" id="sched-scroll">${renderScheduleSheet()}</div>
+        <div id="sched-status">${renderSchedStatus()}</div>
+        ${helpToggle(
+          "schedule",
+          `이름 칸을 누르면 시간 수정·삭제, 빈 칸(사선)을 누르면 근무자 추가예요. 오른쪽에서 입력하면 표에 바로 보여요.<br />
+          <b>저장</b>하면 직원 관리·달력·근무 기록에 반영되고, <b>임시저장</b>은 반영하지 않고 고친 내용만 보관해요.<br />
+          지난 근무 기록은 제목 기간의 시작일(<b>${shortDate(scheduleStart())}</b>)부터 바뀌어요. 제목의 기간과 비고 칸도 눌러서 고칠 수 있어요.`,
+        )}
+      </div>
+      <aside class="sched-panel">${renderSlotPanel()}</aside>
+    </div>`,
+    { center: true, wide: true },
   );
 }
 
-function renderSlotEditor() {
+function renderSlotPanel() {
   const ed = state.slotEdit;
-  if (!ed) return "";
-  const emp = ed.empId ? employeeById(ed.empId) : null;
+  if (!ed) {
+    return `
+      <p class="staff-title">근무 수정</p>
+      <p class="sub">근무표에서 이름 칸이나 빈 칸(사선)을 누르면 여기서 시간을 입력할 수 있어요.</p>`;
+  }
+  const empId = ed.empId ?? ed.addEmpId;
+  const emp = empId ? employeeById(empId) : null;
   const shift = emp ? effWeekly(emp)[ed.wd] : null;
   const start = shift?.start ?? fromMin(ed.start).padStart(5, "0");
   const end = shift?.end ?? fromMin(Math.min(ed.start + 6 * 60, 23 * 60)).padStart(5, "0");
-  const choices = store.employees.filter((e) => e.active && !effWeekly(e)[ed.wd]);
+  // 추가할 때 고를 수 있는 사람: 이 칸을 열 때 그 요일 근무가 없던 사람
+  const before = (e) => ({ ...e.weekly, ...(ed.snapshot[e.id] ?? {}) })[ed.wd];
+  const choices = store.employees.filter((e) => e.active && (!before(e) || e.id === ed.addEmpId));
   return `
-    <div class="ps-backdrop" data-action="close-slot">
-      <form class="slot-dialog" id="slot-form" data-stop>
-        <p class="staff-title">${WEEKDAYS[ed.wd]}요일 · ${emp ? esc(emp.name) : "근무자 추가"}</p>
-        <p class="sub">근무표 [저장]을 누르면 매주 ${WEEKDAYS[ed.wd]}요일에 적용돼요.</p>
-        ${
-          emp
-            ? ""
-            : `<select id="slot-emp" class="field" required aria-label="직원">
-                ${choices.map((e) => `<option value="${e.id}">${esc(e.name)}${isManager(e) ? " (매니저)" : ""}</option>`).join("")}
-              </select>`
-        }
-        <div class="edit-row">
-          ${timeInput("slot-start", start, "시작 시간")}
-          <span>~</span>
-          ${timeInput("slot-end", end, "종료 시간")}
-        </div>
-        ${state.error ? `<p class="error">${esc(state.error)}</p>` : ""}
-        <div class="action-row">
-          ${emp ? `<button type="button" class="btn-ghost danger-ghost" data-action="remove-slot">삭제</button>` : `<button type="button" class="btn-ghost" data-action="close-slot">취소</button>`}
-          <button type="submit" class="btn-primary">${emp ? "저장" : "추가"}</button>
-        </div>
-        ${emp ? `<button type="button" class="link-btn slot-cancel" data-action="close-slot">취소</button>` : ""}
-      </form>
-    </div>`;
+    <form class="slot-form" id="slot-form">
+      <p class="staff-title">${WEEKDAYS[ed.wd]}요일 · ${ed.empId ? esc(emp.name) : "근무자 추가"}</p>
+      <p class="sub">입력하면 왼쪽 근무표에 바로 보여요. 근무표 <b>저장</b>을 눌러야 다른 화면에 반영돼요.</p>
+      ${
+        ed.empId
+          ? ""
+          : `<select id="slot-emp" class="field" aria-label="직원">
+              <option value="">직원 선택</option>
+              ${choices.map((e) => `<option value="${e.id}"${e.id === ed.addEmpId ? " selected" : ""}>${esc(e.name)}${isManager(e) ? " (매니저)" : ""}</option>`).join("")}
+            </select>`
+      }
+      <div class="edit-row">
+        ${timeInput("slot-start", start, "시작 시간")}
+        <span>~</span>
+        ${timeInput("slot-end", end, "종료 시간")}
+      </div>
+      ${state.error ? `<p class="error">${esc(state.error)}</p>` : ""}
+      <div class="action-row">
+        <button type="button" class="btn-ghost" data-action="cancel-slot">취소</button>
+        <button type="submit" class="btn-primary">완료</button>
+      </div>
+      ${ed.empId ? `<button type="button" class="btn-ghost danger-ghost slot-remove" data-action="remove-slot">이 요일 근무 빼기</button>` : ""}
+    </form>`;
 }
 
-function saveSlot() {
+const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+
+// 추가할 사람을 바꾸면 앞서 고른 사람의 초안은 칸을 열기 전으로 되돌린다
+function restoreSnapshot(empId) {
+  const w = schedWork().weekly;
+  const snap = state.slotEdit.snapshot;
+  if (hasOwn(snap, empId)) w[empId] = structuredClone(snap[empId]);
+  else delete w[empId];
+}
+
+// 입력하는 대로 초안에 넣고 근무표만 다시 그린다 (입력칸 포커스 유지)
+function liveSlot({ final = false } = {}) {
   const ed = state.slotEdit;
-  const emp = employeeById(ed.empId ?? document.getElementById("slot-emp")?.value);
-  if (!emp) return;
-  const start = readTime("slot-start");
-  const end = readTime("slot-end");
-  if (!start || !end || start === end) {
-    state.error = "시간은 09:00 처럼 숫자로 입력해주세요.";
+  if (!ed) return true;
+  const empId = ed.empId ?? (document.getElementById("slot-emp")?.value || null);
+  if (!ed.empId && empId !== ed.addEmpId) {
+    if (ed.addEmpId) restoreSnapshot(ed.addEmpId);
+    ed.addEmpId = empId;
+    refreshSchedule();
+  }
+  if (!empId) return false;
+  const read = (id) => {
+    const el = document.getElementById(id);
+    const digits = el.value.replace(/\D/g, "");
+    if (!digits) return el.placeholder;
+    if (!final && digits.length < 4) return null; // 입력 중간(예: "15")에는 기다린다
+    return normalizeTime(el.value);
+  };
+  const start = read("slot-start");
+  const end = read("slot-end");
+  if (!start || !end || start === end) return false;
+  draftWeekly(employeeById(empId), ed.wd, { start, end });
+  refreshSchedule();
+  return true;
+}
+
+function refreshSchedule() {
+  const scroll = document.getElementById("sched-scroll");
+  if (scroll) scroll.innerHTML = renderScheduleSheet();
+  const status = document.getElementById("sched-status");
+  if (status) status.innerHTML = renderSchedStatus();
+}
+
+function finishSlot() {
+  if (!liveSlot({ final: true })) {
+    const ed = state.slotEdit;
+    state.error = ed.empId || ed.addEmpId ? "시간은 09:00 처럼 숫자로 입력해주세요." : "직원을 선택해주세요.";
     render();
     return;
   }
-  draftWeekly(emp, ed.wd, { start, end });
   state.slotEdit = null;
   state.error = "";
   render();
@@ -1510,6 +1576,7 @@ window.addEventListener("hashchange", () => {
   state.payslipId = null;
   state.allowDraft = null;
   state.slotEdit = null;
+  state.helpOpen = {};
   state.unlockOpen = false;
   render();
 });
@@ -1694,27 +1761,41 @@ app.addEventListener("click", (e) => {
       schedulePdf(el);
       return;
     case "schedule-temp":
+      if (state.slotEdit) liveSlot({ final: true });
+      state.slotEdit = null;
       tempSaveSchedule();
       break;
     case "schedule-save":
+      if (state.slotEdit) liveSlot({ final: true });
       if (!window.confirm("근무표를 저장하면 직원 관리·달력·근무 기록에 반영돼요. 저장할까요?")) return;
+      state.slotEdit = null;
       commitSchedule();
       break;
     case "edit-slot":
+      if (state.slotEdit) liveSlot({ final: true }); // 보던 칸은 입력한 대로 두고 넘어간다
       state.error = "";
-      state.slotEdit = { wd: el.dataset.wd, empId: el.dataset.id ?? null, start: Number(el.dataset.start) };
-      break;
-    case "close-slot":
+      state.slotEdit = {
+        wd: el.dataset.wd,
+        empId: el.dataset.id ?? null,
+        addEmpId: null,
+        start: Number(el.dataset.start),
+        snapshot: structuredClone(schedWork().weekly),
+      };
+      render();
+      document.getElementById(state.slotEdit.empId ? "slot-start" : "slot-emp")?.focus();
+      return;
+    case "cancel-slot":
+      state.schedWork.weekly = state.slotEdit.snapshot; // 이번에 입력한 것 되돌리기
       state.slotEdit = null;
       state.error = "";
       break;
-    case "remove-slot": {
-      const emp = employeeById(state.slotEdit.empId);
-      if (!window.confirm(`${emp.name}님의 ${WEEKDAYS[state.slotEdit.wd]}요일 근무를 근무표에서 뺄까요?`)) return;
-      draftWeekly(emp, state.slotEdit.wd, null);
+    case "remove-slot":
+      draftWeekly(employeeById(state.slotEdit.empId), state.slotEdit.wd, null);
       state.slotEdit = null;
       break;
-    }
+    case "toggle-help":
+      state.helpOpen[el.dataset.key] = !state.helpOpen[el.dataset.key];
+      break;
     case "open-payslip":
       state.payslipId = id;
       state.allowDraft = structuredClone(allowancesFor(state.payroll.month, id));
@@ -1763,7 +1844,7 @@ app.addEventListener("keydown", (e) => {
 app.addEventListener("submit", (e) => {
   if (e.target.id === "slot-form") {
     e.preventDefault();
-    saveSlot();
+    finishSlot();
     return;
   }
   if (e.target.id === "add-extra") {
@@ -1910,3 +1991,11 @@ window.matchMedia("(min-width: 768px)").addEventListener("change", (mq) => {
 });
 
 render();
+
+// 근무표 편집 패널: 입력하는 대로 왼쪽 표에 반영
+app.addEventListener("input", (e) => {
+  if (e.target.id === "slot-start" || e.target.id === "slot-end") liveSlot();
+});
+app.addEventListener("change", (e) => {
+  if (e.target.id === "slot-emp") liveSlot();
+});
