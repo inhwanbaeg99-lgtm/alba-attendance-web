@@ -1691,3 +1691,25 @@ td.name {
   color: var(--accent);
   font-weight: 700;
 }
+
+/* 저장 전 칸 */
+.timesheet td.pending {
+  background: #fff1e0 !important;
+}
+
+.timesheet td.pending .ts-input {
+  color: #d9480f;
+  font-weight: 700;
+}
+
+.head-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.pending-note {
+  margin-left: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #d9480f;
+}

@@ -432,6 +432,7 @@ const state = {
   schedWork: null, // 근무표 편집 초안 (저장 전)
   allowDraft: null, // 명세서 창에서 수정 중인 수당 (저장 전)
   helpOpen: {}, // ? 설명 펼침 상태
+  tsDraft: {}, // 근무 상세에서 고쳤지만 아직 저장 안 한 시간 { "직원id|날짜": 시간 }
 };
 
 {
@@ -918,13 +919,18 @@ function renderTimesheet(ym, employeeId) {
               <td class="ts-no">${i + 1}</td>
               <td class="ts-name">${esc(r.emp.name)}</td>
               ${r.cells
-                .map((h, j) => {
+                .map((saved, j) => {
                   const d = days[j];
                   if (d > today) return `<td class="ts-day${wkClass(d)}"></td>`;
-                  return `<td class="ts-day${wkClass(d)}${r.edited[j] ? " edited" : ""}"><input class="ts-input" type="text" inputmode="decimal" value="${hour1(h)}" data-ts-key="${r.emp.id}|${d}" aria-label="${esc(r.emp.name)} ${shortDate(d)} 근무시간" title="${r.edited[j] ? "직접 고친 시간" : ""}" /></td>`;
+                  const key = `${r.emp.id}|${d}`;
+                  const pending = hasOwn(state.tsDraft, key);
+                  const h = pending ? state.tsDraft[key] : saved;
+                  const cls = pending ? " pending" : r.edited[j] ? " edited" : "";
+                  const title = pending ? `저장 전 (원래 ${hour1(saved) || "없음"})` : r.edited[j] ? "직접 고친 시간" : "";
+                  return `<td class="ts-day${wkClass(d)}${cls}"><input class="ts-input" type="text" inputmode="decimal" value="${hour1(h)}" data-ts-key="${key}" aria-label="${esc(r.emp.name)} ${shortDate(d)} 근무시간" title="${title}" /></td>`;
                 })
                 .join("")}
-              <td class="ts-total">${r.total.toFixed(1)}</td>
+              <td class="ts-total">${r.cells.reduce((sum, saved, j) => sum + (state.tsDraft[`${r.emp.id}|${days[j]}`] ?? saved), 0).toFixed(1)}</td>
             </tr>`,
             )
             .join("")}
@@ -1022,6 +1028,7 @@ function renderRecords() {
   const [y, m] = month.split("-").map(Number);
   const { recs, rows, total } = payrollFor(month, employeeId);
   const taxOn = store.settings?.tax !== "none";
+  const tsPending = Object.keys(state.tsDraft).length;
 
   const summary = rows
     .map(
@@ -1068,8 +1075,11 @@ function renderRecords() {
     </div>
 
     <div class="section-head">
-      <h3>근무 상세</h3>
-      <button type="button" class="pill plain-dark" data-action="export-xlsx"${recs.length ? "" : " disabled"}>엑셀 다운로드</button>
+      <h3>근무 상세${tsPending ? `<span class="pending-note">저장하지 않은 변경 ${tsPending}칸</span>` : ""}</h3>
+      <div class="head-actions">
+        <button type="button" class="pill" data-action="save-timesheet"${tsPending ? "" : " disabled"}>저장</button>
+        <button type="button" class="pill plain-dark" data-action="export-xlsx"${recs.length ? "" : " disabled"}>엑셀 다운로드</button>
+      </div>
     </div>
     ${renderTimesheet(month, employeeId)}
 
@@ -1784,6 +1794,14 @@ app.addEventListener("click", (e) => {
     case "export-xlsx":
       exportXlsx(el);
       return;
+    case "save-timesheet":
+      for (const [key, hours] of Object.entries(state.tsDraft)) {
+        const [empId, date] = key.split("|");
+        setDayHours(empId, date, hours);
+      }
+      state.tsDraft = {};
+      save();
+      break;
     case "payroll-prev":
     case "payroll-next":
       state.payroll.month = shiftMonth(state.payroll.month, action === "payroll-prev" ? -1 : 1);
@@ -1980,9 +1998,12 @@ app.addEventListener("change", (e) => {
       }, 1200);
       return;
     }
+    // 저장 전까지는 초안에만 둔다 (원래 값으로 돌려놓으면 초안에서 뺀다)
     const [empId, date] = t.dataset.tsKey.split("|");
-    setDayHours(empId, date, hours);
-    save();
+    const rec = recordFor(empId, date);
+    const saved = rec ? Math.round(hoursBetween(rec.clockIn, rec.clockOut) * 100) / 100 : 0;
+    if (hours === saved) delete state.tsDraft[t.dataset.tsKey];
+    else state.tsDraft[t.dataset.tsKey] = hours;
     // Tab 으로 다음 칸에 가 있는 포커스를 다시 그린 뒤에도 유지
     setTimeout(() => {
       const key = document.activeElement?.dataset?.tsKey;
