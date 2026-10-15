@@ -61,6 +61,12 @@ function formatTime(iso) {
   }).format(new Date(iso));
 }
 
+// 달력 칸이 좁을 때: "07:00" → "7", "22:30" → "22:30"
+function shortTime(iso) {
+  const [h, m] = formatTime(iso).split(":");
+  return m === "00" ? String(Number(h)) : `${Number(h)}:${m}`;
+}
+
 function hoursBetween(start, end) {
   if (!start || !end) return 0;
   return Math.max(0, (new Date(end) - new Date(start)) / 3_600_000);
@@ -475,7 +481,10 @@ function renderCalendar() {
       const isRest = i % 7 === 0 || Boolean(holiday);
       const numClass = date === today ? "today" : isRest ? "rest" : "";
       const chips = [
-        ...entries.slice(0, MAX_VISIBLE).map((r) => `<span class="chip">${esc(employeeById(r.employeeId).name)}</span>`),
+        ...entries.slice(0, MAX_VISIBLE).map(
+          (r) =>
+            `<span class="chip">${esc(employeeById(r.employeeId).name)} <span class="chip-time t-long">${formatTime(r.clockIn)}~${formatTime(r.clockOut)}</span><span class="chip-time t-short">${shortTime(r.clockIn)}-${shortTime(r.clockOut)}</span></span>`,
+        ),
         entries.length > MAX_VISIBLE ? `<span class="chip more">+${entries.length - MAX_VISIBLE}명</span>` : "",
       ].join("");
       return `
@@ -1466,7 +1475,6 @@ function renderSlotPanel() {
   return `
     <form class="slot-form" id="slot-form">
       <p class="staff-title">${WEEKDAYS[ed.wd]}요일 · ${ed.empId ? esc(emp.name) : "근무자 추가"}</p>
-      <p class="sub">입력하면 왼쪽 근무표에 바로 보여요. 근무표 <b>저장</b>을 눌러야 다른 화면에 반영돼요.</p>
       ${
         ed.empId
           ? ""
@@ -1485,7 +1493,7 @@ function renderSlotPanel() {
         <button type="button" class="btn-ghost" data-action="cancel-slot">취소</button>
         <button type="submit" class="btn-primary">완료</button>
       </div>
-      ${ed.empId ? `<button type="button" class="btn-ghost danger-ghost slot-remove" data-action="remove-slot">삭제</button>` : ""}
+      ${ed.empId ? `<button type="button" class="btn-ghost danger-ghost slot-remove" data-action="remove-slot">근무 삭제</button>` : ""}
     </form>`;
 }
 
@@ -2014,7 +2022,7 @@ app.addEventListener("change", (e) => {
       if (key) {
         const el = document.querySelector(`[data-ts-key="${key}"]`);
         el?.focus();
-        el?.select();
+        caretToEnd(el);
       }
     });
     return;
@@ -2110,4 +2118,17 @@ app.addEventListener("input", (e) => {
 });
 app.addEventListener("change", (e) => {
   if (e.target.id === "slot-emp") liveSlot();
+});
+
+// 근무 상세 칸: 어디를 눌러도 커서는 맨 뒤 (뒤에서부터 지우고 다시 입력)
+function caretToEnd(el) {
+  if (!el) return;
+  const n = el.value.length;
+  el.setSelectionRange(n, n);
+}
+app.addEventListener("focusin", (e) => {
+  if (e.target.classList?.contains("ts-input")) setTimeout(() => caretToEnd(e.target));
+});
+app.addEventListener("mouseup", (e) => {
+  if (e.target.classList?.contains("ts-input")) caretToEnd(e.target);
 });
