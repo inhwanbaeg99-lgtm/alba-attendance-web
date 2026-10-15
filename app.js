@@ -144,7 +144,7 @@ function ensureColors(data = store) {
 
 // 매니저는 근무표에만 나오고 출근·급여에서는 빠진다
 const MANAGER_SCHEDULE = { 1: "10:00~18:00", 2: "10:00~18:00", 5: "10:00~17:00", 6: "08:00~16:00", 0: "08:00~16:00" };
-const INITIAL_SCHEDULE_META = { period: "10. 5 ~ 11. 8", notes: { 1: "24", 2: "23", 3: "26", 4: "27", 5: "27", 6: "34", 0: "32" } };
+const INITIAL_SCHEDULE_META = { period: "2026. 10. 5 ~ 11. 8", notes: { 1: "24", 2: "23", 3: "26", 4: "27", 5: "27", 6: "34", 0: "32" } };
 
 const toWeekly = (days) => Object.fromEntries(Object.entries(days).map(([wd, range]) => [wd, parseRange(range)]));
 const isManager = (e) => e.role === "manager";
@@ -302,6 +302,10 @@ if (!store.scheduleMeta) {
   if (!store.employees.some(isManager)) store.employees.push(managerEmployee());
   store.scheduleMeta = structuredClone(INITIAL_SCHEDULE_META);
 }
+// 예전 데이터: 기간에 연도가 없으면 앞에 붙인다 ("10. 5 ~ 11. 8" → "2026. 10. 5 ~ 11. 8")
+if (store.scheduleMeta?.period && !/\d{4}/.test(store.scheduleMeta.period) && /\d/.test(store.scheduleMeta.period)) {
+  store.scheduleMeta.period = `${scheduleStart().slice(0, 4)}. ${store.scheduleMeta.period.trim()}`;
+}
 // 예전 데이터: 오늘 이전 기록은 근무표로 자동 채운 것으로 표시
 if (!store.autoMarked) {
   const today = todayDateString();
@@ -321,12 +325,17 @@ ensureColors();
 save();
 
 // ---------- 근무표 변경 → 근무 기록 연동 ----------
-// 근무표 제목의 기간 시작일(예: "10. 5 ~ 11. 8" → 2026-10-05)부터 오늘까지의 기록을 새 근무 시간에 맞춘다.
+// 근무표 제목의 기간 시작일(예: "2026. 10. 5 ~ 11. 8" → 2026-10-05, 연도가 없으면 가까운 해)부터 오늘까지의 기록을 새 근무 시간에 맞춘다.
 // - 날짜별로 따로 수정한 날(store.shifts)은 건드리지 않는다
 // - 자동으로 채운 지난 기록: 시간 변경 / 근무 추가 시 생성 / 근무 삭제 시 제거
 // - 직접 출근한 기록: 시간만 맞추고 지우지는 않는다
 function scheduleStart() {
-  const m = (store.scheduleMeta?.period ?? "").match(/(\d{1,2})\s*\.\s*(\d{1,2})/);
+  const period = store.scheduleMeta?.period ?? "";
+  const pad = (n) => n.padStart(2, "0");
+  // 연도가 있으면 그대로 (2026. 10. 5 / 2026-10-05 / 2026년 10월 5일)
+  const full = period.match(/(\d{4})\s*[.\-/년]\s*(\d{1,2})\s*[.\-/월]\s*(\d{1,2})/);
+  if (full) return `${full[1]}-${pad(full[2])}-${pad(full[3])}`;
+  const m = period.match(/(\d{1,2})\s*\.\s*(\d{1,2})/);
   const today = todayDateString();
   if (!m) return today;
   const md = `${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
@@ -1435,7 +1444,7 @@ function renderScheduleSheet() {
   return `
     <div class="sched-sheet" id="sched-sheet">
       <div class="sc-head">
-        <h2 class="sc-title">[${STORE_NAME} 근무표](<input class="sc-period" value="${esc(meta.period ?? "")}" size="${Math.max(6, [...(meta.period ?? "")].length)}" data-meta="period" placeholder="10. 5 ~ 11. 8" aria-label="기간" />)</h2>
+        <h2 class="sc-title">[${STORE_NAME} 근무표](<input class="sc-period" value="${esc(meta.period ?? "")}" size="${Math.max(6, [...(meta.period ?? "")].length)}" data-meta="period" placeholder="2026. 10. 5 ~ 11. 8" aria-label="기간" />)</h2>
         <div class="sc-actions" data-html2canvas-ignore>
           <button type="button" class="pill plain-dark" data-action="schedule-temp"${schedDirty() ? "" : " disabled"}>임시저장</button>
           <button type="button" class="pill" data-action="schedule-save"${hasDraft() ? "" : " disabled"}>저장</button>
