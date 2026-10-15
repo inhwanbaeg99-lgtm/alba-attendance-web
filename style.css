@@ -159,9 +159,14 @@ ul {
 }
 
 /* ---------- 관리자 PIN ---------- */
+.home-inner {
+  position: relative;
+}
+
+/* 달력 박스 바로 위 가운데 (박스는 화면 세로 가운데 그대로) */
 .unlock {
   position: absolute;
-  top: calc(20px + env(safe-area-inset-top, 0px));
+  bottom: calc(100% + 18px);
   left: 50%;
   transform: translateX(-50%);
   z-index: 5;
@@ -235,6 +240,17 @@ ul {
   border-radius: 999px;
   background: var(--bg);
   color: var(--ink);
+}
+
+.cal-head .round-btn,
+.month-nav .round-btn {
+  background: none !important;
+  color: var(--ink);
+}
+
+.cal-head .round-btn:hover,
+.month-nav .round-btn:hover {
+  background: color-mix(in srgb, var(--ink) 8%, transparent) !important;
 }
 
 .round-btn:hover,
@@ -841,8 +857,23 @@ ul {
   align-self: center;
 }
 
+.records-bar .month-nav {
+  gap: 4px;
+}
+
+.records-bar .month-nav h2 {
+  font-size: 20px;
+  font-weight: 700;
+}
+
 .records-bar .month-nav .round-btn {
-  background: var(--bg);
+  width: 30px;
+  height: 30px;
+}
+
+.records-bar .month-nav .round-btn svg {
+  width: 18px;
+  height: 18px;
 }
 
 .section-head {
@@ -1128,6 +1159,10 @@ td.name {
 
 .timesheet .weekend {
   background: var(--accent-soft);
+}
+
+.timesheet th.red-day {
+  color: var(--red);
 }
 
 .timesheet .ts-no {
@@ -1494,6 +1529,7 @@ td.name {
 
 /* ? 설명 */
 .help {
+  scroll-margin-bottom: 40px;
   margin-top: 12px;
   display: flex;
   align-items: flex-start;
@@ -1535,8 +1571,21 @@ td.name {
 
 .sched-layout {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 24px;
+}
+
+.sched-side {
+  width: 280px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sched-side .sched-status {
+  margin: 0;
+  padding: 0 4px;
 }
 
 .sched-main {
@@ -1545,11 +1594,6 @@ td.name {
 }
 
 .sched-panel {
-  width: 280px;
-  flex-shrink: 0;
-  position: sticky;
-  top: 24px;
-  margin-top: 52px;
   border-radius: 20px;
   background: var(--paper);
   padding: 20px;
@@ -1591,9 +1635,13 @@ td.name {
   .sched-layout {
     flex-direction: column;
   }
-  .sched-panel {
-    position: static;
+  .sched-side {
     width: 100%;
-    margin-top: 0;
+  }
+}
+
+@media (max-width: 767px) {
+  .home {
+    padding-top: 96px;
   }
 }

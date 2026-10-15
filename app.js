@@ -724,13 +724,17 @@ function renderEmployees() {
       <div><label for="f-wage">시급(원)</label><input id="f-wage" class="field money" style="width:112px" type="text" inputmode="numeric" value="${formatMoney(DEFAULT_WAGE)}" required /></div>
       <button type="submit" class="pill">추가</button>
     </form>
-    <p class="hint">요일 칸에 <b>7-12</b>, <b>18-2230</b> 처럼 입력하면 근무 시간이 저장돼요. 비우면 쉬는 날이에요. 이름 앞 색은 근무표 색이에요(자동으로 겹치지 않게 정해져요). 근무표에서 같은 시각에 시작하면 위에 있는 사람이 왼쪽 칸에 들어가요.</p>
     <div class="table-wrap">
       <table class="schedule">
         <thead><tr><th>이름</th>${order.map((wd) => `<th class="${wd === 0 ? "rest" : ""}">${WEEKDAYS[wd]}</th>`).join("")}<th>시급</th><th>상태</th><th>구분</th><th>관리</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="12" class="empty">등록된 직원이 없습니다.</td></tr>`}</tbody>
       </table>
-    </div>`,
+    </div>
+    ${helpToggle(
+      "employees",
+      `요일 칸에 <b>7-12</b>, <b>18-2230</b> 처럼 입력하면 근무 시간이 저장돼요. 비우면 쉬는 날이에요.<br />
+      이름 앞 색은 근무표 색이에요(자동으로 겹치지 않게 정해져요). 근무표에서 같은 시각에 시작하면 위에 있는 사람이 왼쪽 칸에 들어가요.`,
+    )}`,
     { center: true },
   );
 }
@@ -864,7 +868,7 @@ function renderTimesheet(ym, employeeId) {
   if (!rows.length) return `<div class="table-wrap ts-wrap"><p class="empty">이 달의 근무 기록이 없습니다.</p></div>`;
   const wkClass = (d) => {
     const wd = weekdayOf(d);
-    return wd === 0 || wd === 6 ? " weekend" : "";
+    return (wd === 0 || wd === 6 ? " weekend" : "") + (wd === 0 || HOLIDAYS[d] ? " red-day" : "");
   };
   return `
     <div class="table-wrap ts-wrap">
@@ -1384,7 +1388,6 @@ function renderSchedule() {
     <div class="sched-layout">
       <div class="sched-main">
         <div class="sched-scroll" id="sched-scroll">${renderScheduleSheet()}</div>
-        <div id="sched-status">${renderSchedStatus()}</div>
         ${helpToggle(
           "schedule",
           `이름 칸을 누르면 시간 수정·삭제, 빈 칸(사선)을 누르면 근무자 추가예요. 오른쪽에서 입력하면 표에 바로 보여요.<br />
@@ -1392,7 +1395,10 @@ function renderSchedule() {
           지난 근무 기록은 제목 기간의 시작일(<b>${shortDate(scheduleStart())}</b>)부터 바뀌어요. 제목의 기간과 비고 칸도 눌러서 고칠 수 있어요.`,
         )}
       </div>
-      <aside class="sched-panel">${renderSlotPanel()}</aside>
+      <div class="sched-side">
+        <div id="sched-status">${renderSchedStatus()}</div>
+        <aside class="sched-panel">${renderSlotPanel()}</aside>
+      </div>
     </div>`,
     { center: true, wide: true },
   );
@@ -1435,7 +1441,7 @@ function renderSlotPanel() {
         <button type="button" class="btn-ghost" data-action="cancel-slot">취소</button>
         <button type="submit" class="btn-primary">완료</button>
       </div>
-      ${ed.empId ? `<button type="button" class="btn-ghost danger-ghost slot-remove" data-action="remove-slot">이 요일 근무 빼기</button>` : ""}
+      ${ed.empId ? `<button type="button" class="btn-ghost danger-ghost slot-remove" data-action="remove-slot">삭제</button>` : ""}
     </form>`;
 }
 
@@ -1793,9 +1799,14 @@ app.addEventListener("click", (e) => {
       draftWeekly(employeeById(state.slotEdit.empId), state.slotEdit.wd, null);
       state.slotEdit = null;
       break;
-    case "toggle-help":
-      state.helpOpen[el.dataset.key] = !state.helpOpen[el.dataset.key];
-      break;
+    case "toggle-help": {
+      const key = el.dataset.key;
+      state.helpOpen[key] = !state.helpOpen[key];
+      render();
+      // 펼친 설명이 화면 안에 다 보이도록 스크롤
+      if (state.helpOpen[key]) document.querySelector(`[data-key="${key}"]`)?.closest(".help")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      return;
+    }
     case "open-payslip":
       state.payslipId = id;
       state.allowDraft = structuredClone(allowancesFor(state.payroll.month, id));
