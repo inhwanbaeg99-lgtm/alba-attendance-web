@@ -9,6 +9,7 @@ const ADMIN_KEY = "alba-attendance:admin";
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 const MAX_VISIBLE = 5;
 const PIN_LENGTH = 4;
+const XLSX_SRC = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
 const PANEL_ANIM_MS = 320;
 
 // 2026년 대한민국 법정공휴일 (대체공휴일 포함)
@@ -298,17 +299,15 @@ const state = {
   adding: false, // + 로 일정에 없던 인원 등록 중
   justAddedId: null, // 방금 출근한 기록 (날짜 박스에서 한 번만 애니메이션)
   unlockOpen: false,
-  pin: "",
   error: "",
-  records: { from: "", to: "", employeeId: "" },
+  payroll: { month: "", employeeId: "" }, // 근무 기록 화면: "2026-10"
 };
 
 {
   const t = todayDateString();
   state.year = Number(t.slice(0, 4));
   state.month = Number(t.slice(5, 7));
-  state.records.from = addDays(t, -6);
-  state.records.to = t;
+  state.payroll.month = t.slice(0, 7);
 }
 
 // ---------- 화면: 홈 ----------
@@ -317,20 +316,9 @@ function renderUnlock() {
   if (!state.unlockOpen) {
     return `<div class="unlock"><button type="button" class="unlock-title" data-action="open-unlock">MGC · 춘천온의파크점</button></div>`;
   }
-  const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "clear", "0", "submit"];
-  const backspace = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.2 5H20a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9.2a2 2 0 0 1-1.5-.7L2.8 13.3a2 2 0 0 1 0-2.6l4.9-5A2 2 0 0 1 9.2 5Z"/><path d="m11.5 9 6 6m0-6-6 6"/></svg>`;
   return `
     <div class="unlock" id="unlock">
-      <input id="pin-input" class="pin-input" type="password" inputmode="none" readonly aria-label="관리자 번호" value="${esc(state.pin)}" />
-      <div class="keypad">
-        ${keys
-          .map((k) => {
-            const label = k === "clear" ? backspace : k === "submit" ? "→" : k;
-            const aria = k === "clear" ? ' aria-label="관리자 번호 지우기"' : k === "submit" ? ' aria-label="관리자 로그인"' : "";
-            return `<button type="button" data-key="${k}"${aria}>${label}</button>`;
-          })
-          .join("")}
-      </div>
+      <input id="pin-input" class="pin-input" type="password" inputmode="numeric" maxlength="${PIN_LENGTH}" autocomplete="off" placeholder="관리자 번호" aria-label="관리자 번호" />
     </div>`;
 }
 
@@ -541,18 +529,12 @@ function renderDayPage(date) {
 function renderAdminShell(active, content) {
   const link = (href, label, key) => `<a href="${href}" class="${active === key ? "active" : ""}">${label}</a>`;
   return `
-    <header class="admin-header">
-      <div class="admin-header-inner">
-        <a href="#/" class="admin-brand">알바 관리자</a>
-        <nav class="admin-nav">
-          ${link("#/", "출퇴근 화면", "home")}
-          ${link("#/admin/employees", "직원 관리", "employees")}
-          ${link("#/admin/records", "근무 기록", "records")}
-          <button type="button" data-action="logout">로그아웃</button>
-        </nav>
-      </div>
-    </header>
-    <main class="admin-main">${content}</main>`;
+    <main class="admin-main">${content}</main>
+    <nav class="admin-bottom" aria-label="관리자 메뉴">
+      ${link("#/admin/employees", "직원 관리", "employees")}
+      ${link("#/admin/records", "근무 기록", "records")}
+      <button type="button" data-action="logout">로그아웃</button>
+    </nav>`;
 }
 
 function renderEmployees() {
@@ -596,63 +578,247 @@ function renderEmployees() {
   );
 }
 
-function queryRecords() {
-  const { from, to, employeeId } = state.records;
+// ---------- 급여 계산 ----------
+// 주휴수당: 월~일 한 주에 15시간 이상 일하고 근무표상 근무일에 모두 출근했으면
+//   (그 주 근무시간 ÷ 40) × 8시간 × 시급  (40시간 이상이면 8시간분)
+//   주가 끝나는 일요일이 속한 달에 넣고, 아직 끝나지 않은 주는 계산하지 않는다.
+// 세금(3.3%): 소득세 3% + 지방소득세(소득세의 10%), 10원 미만 절사, 소득세 1,000원 미만이면 걷지 않음(소액부징수).
+
+function monthRecords(ym, employeeId) {
   return store.records
-    .filter((r) => employeeById(r.employeeId))
-    .filter((r) => (!employeeId || r.employeeId === employeeId) && (!from || r.date >= from) && (!to || r.date <= to))
-    .sort((a, b) => (a.date === b.date ? (a.createdAt < b.createdAt ? -1 : 1) : a.date < b.date ? 1 : -1))
-    .map((r) => {
-      const emp = employeeById(r.employeeId);
-      const hours = hoursBetween(r.clockIn, r.clockOut);
-      return { ...r, employeeName: emp.name, hours, pay: Math.round(hours * emp.hourlyWage) };
+    .filter((r) => r.date.startsWith(ym) && employeeById(r.employeeId) && (!employeeId || r.employeeId === employeeId))
+    .sort((a, b) => (a.date === b.date ? (a.clockIn < b.clockIn ? -1 : 1) : a.date < b.date ? -1 : 1));
+}
+
+function isScheduled(emp, date) {
+  return Boolean(emp.weekly[weekdayOf(date)] || store.shifts[date]?.[emp.id]);
+}
+
+function weeklyAllowance(emp, ym) {
+  const today = todayDateString();
+  const [y, m] = ym.split("-").map(Number);
+  const last = `${ym}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
+  const weeks = [];
+  // 이 달에 속한 일요일마다 그 주(월~일)를 본다
+  for (let d = `${ym}-01`; d <= last; d = addDays(d, 1)) {
+    if (weekdayOf(d) !== 0) continue;
+    const sun = d;
+    const mon = addDays(sun, -6);
+    const days = Array.from({ length: 7 }, (_, i) => addDays(mon, i));
+    const recs = store.records.filter((r) => r.employeeId === emp.id && r.date >= mon && r.date <= sun);
+    const hours = recs.reduce((sum, r) => sum + hoursBetween(r.clockIn, r.clockOut), 0);
+    if (!recs.length) continue;
+    let reason = "";
+    if (sun >= today) reason = "주가 아직 안 끝남";
+    else if (hours < 15) reason = "주 15시간 미만";
+    else if (days.some((x) => isScheduled(emp, x) && !recordFor(emp.id, x))) reason = "결근 있음";
+    const allowHours = reason ? 0 : Math.min(hours, 40) / 5;
+    weeks.push({ mon, sun, hours, reason, allowHours, amount: Math.round(allowHours * emp.hourlyWage) });
+  }
+  return { weeks, total: weeks.reduce((sum, w) => sum + w.amount, 0) };
+}
+
+const floor10 = (n) => Math.floor(n / 10) * 10;
+
+function taxes(gross) {
+  if (store.settings?.tax === "none") return { income: 0, local: 0 };
+  let income = floor10(gross * 0.03);
+  if (income < 1000) income = 0;
+  return { income, local: floor10(income * 0.1) };
+}
+
+function payrollFor(ym, employeeId) {
+  const recs = monthRecords(ym, employeeId);
+  const ids = [...new Set(recs.map((r) => r.employeeId))];
+  const rows = store.employees
+    .filter((e) => ids.includes(e.id))
+    .map((emp) => {
+      const mine = recs.filter((r) => r.employeeId === emp.id);
+      const hours = mine.reduce((sum, r) => sum + hoursBetween(r.clockIn, r.clockOut), 0);
+      const base = Math.round(hours * emp.hourlyWage);
+      const weekly = weeklyAllowance(emp, ym);
+      const gross = base + weekly.total;
+      const tax = taxes(gross);
+      return { emp, days: mine.length, hours, base, weekly, gross, ...tax, net: gross - tax.income - tax.local };
     });
+  const sum = (k) => rows.reduce((acc, r) => acc + r[k], 0);
+  const total = {
+    days: sum("days"),
+    hours: sum("hours"),
+    base: sum("base"),
+    weekly: rows.reduce((acc, r) => acc + r.weekly.total, 0),
+    gross: sum("gross"),
+    income: sum("income"),
+    local: sum("local"),
+    net: sum("net"),
+  };
+  return { recs, rows, total };
+}
+
+const won = (n) => `${n.toLocaleString()}원`;
+const hrs = (n) => `${Number(n.toFixed(2))}시간`;
+const shortDate = (d) => `${Number(d.slice(5, 7))}/${Number(d.slice(8))} (${WEEKDAYS[weekdayOf(d)]})`;
+
+function shiftMonth(ym, delta) {
+  const [y, m] = ym.split("-").map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
 function renderRecords() {
-  const { from, to, employeeId } = state.records;
-  const records = queryRecords();
-  const totalHours = records.reduce((s, r) => s + r.hours, 0);
-  const totalPay = records.reduce((s, r) => s + r.pay, 0);
+  const { month, employeeId } = state.payroll;
+  const [y, m] = month.split("-").map(Number);
+  const { recs, rows, total } = payrollFor(month, employeeId);
+  const taxOn = store.settings?.tax !== "none";
 
-  const rows = records
+  const summary = rows
     .map(
       (r) => `
       <tr>
-        <td>${r.date}</td>
-        <td class="name">${esc(r.employeeName)}</td>
-        <td>${formatTime(r.clockIn)}</td>
-        <td>${formatTime(r.clockOut)}</td>
-        <td>${r.hours.toFixed(1)}시간</td>
-        <td>${r.pay.toLocaleString()}원</td>
+        <td class="name">${esc(r.emp.name)}</td>
+        <td class="num">${r.days}일</td>
+        <td class="num">${hrs(r.hours)}</td>
+        <td class="num">${won(r.emp.hourlyWage)}</td>
+        <td class="num">${won(r.base)}</td>
+        <td class="num" title="${esc(r.weekly.weeks.map((w) => `${shortDate(w.mon)}~${shortDate(w.sun)} ${hrs(w.hours)} ${w.reason || `→ ${won(w.amount)}`}`).join("\n"))}">${won(r.weekly.total)}</td>
+        <td class="num strong">${won(r.gross)}</td>
+        <td class="num">${won(r.income)}</td>
+        <td class="num">${won(r.local)}</td>
+        <td class="num strong">${won(r.net)}</td>
       </tr>`,
     )
+    .join("");
+
+  const detail = recs
+    .map((r) => {
+      const emp = employeeById(r.employeeId);
+      const h = hoursBetween(r.clockIn, r.clockOut);
+      return `
+      <tr>
+        <td>${shortDate(r.date)}</td>
+        <td class="name">${esc(emp.name)}</td>
+        <td>${formatTime(r.clockIn)} ~ ${formatTime(r.clockOut)}</td>
+        <td class="num">${hrs(h)}</td>
+        <td class="num">${won(Math.round(h * emp.hourlyWage))}</td>
+      </tr>`;
+    })
     .join("");
 
   return renderAdminShell(
     "records",
     `
-    <h2>근무 기록</h2>
+    <div class="month-nav">
+      <button type="button" class="round-btn" data-action="payroll-prev" aria-label="이전 달">${ICON_PREV}</button>
+      <h2>${y}년 ${m}월 근무 기록</h2>
+      <button type="button" class="round-btn" data-action="payroll-next" aria-label="다음 달">${ICON_NEXT}</button>
+    </div>
     <div class="toolbar">
-      <div><label for="r-from">시작일</label><input id="r-from" class="field" type="date" value="${from}" data-filter="from" /></div>
-      <div><label for="r-to">종료일</label><input id="r-to" class="field" type="date" value="${to}" data-filter="to" /></div>
       <div>
         <label for="r-emp">직원</label>
-        <select id="r-emp" class="field" data-filter="employeeId">
+        <select id="r-emp" class="field" data-payroll="employeeId">
           <option value="">전체</option>
           ${store.employees.map((e) => `<option value="${e.id}"${e.id === employeeId ? " selected" : ""}>${esc(e.name)}</option>`).join("")}
         </select>
       </div>
-      <button type="button" class="pill plain" data-action="export-csv"${records.length ? "" : " disabled"}>CSV 내보내기</button>
-      <p class="totals">합계 <b>${totalHours.toFixed(1)}시간</b> · <b>${totalPay.toLocaleString()}원</b></p>
+      <div>
+        <label for="r-tax">세금</label>
+        <select id="r-tax" class="field" data-setting="tax">
+          <option value="3.3"${taxOn ? " selected" : ""}>3.3% 공제 (사업소득)</option>
+          <option value="none"${taxOn ? "" : " selected"}>공제 안 함</option>
+        </select>
+      </div>
+      <button type="button" class="pill" data-action="export-xlsx"${recs.length ? "" : " disabled"}>엑셀 다운로드</button>
     </div>
+
+    <h3>급여 정산</h3>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>날짜</th><th>이름</th><th>출근</th><th>퇴근</th><th>근무시간</th><th>급여</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="6" class="empty">조회된 기록이 없습니다.</td></tr>`}</tbody>
+        <thead><tr><th>이름</th><th class="num">근무일</th><th class="num">근무시간</th><th class="num">시급</th><th class="num">기본급</th><th class="num">주휴수당</th><th class="num">지급총액</th><th class="num">소득세</th><th class="num">지방소득세</th><th class="num">실지급액</th></tr></thead>
+        <tbody>
+          ${summary || `<tr><td colspan="10" class="empty">이 달의 근무 기록이 없습니다.</td></tr>`}
+          ${
+            rows.length > 1
+              ? `<tr class="total-row"><td>합계</td><td class="num">${total.days}일</td><td class="num">${hrs(total.hours)}</td><td></td><td class="num">${won(total.base)}</td><td class="num">${won(total.weekly)}</td><td class="num">${won(total.gross)}</td><td class="num">${won(total.income)}</td><td class="num">${won(total.local)}</td><td class="num">${won(total.net)}</td></tr>`
+              : ""
+          }
+        </tbody>
+      </table>
+    </div>
+    <p class="hint small-hint">
+      주휴수당: 월~일 한 주에 15시간 이상 일하고 근무표상 근무일에 모두 출근하면 (주 근무시간 ÷ 40) × 8시간 × 시급. 그 주가 끝나는 일요일이 속한 달에 포함되고, 아직 끝나지 않은 주는 빠져요. 금액에 마우스를 올리면 주별 내역이 보여요.<br />
+      ${taxOn ? "세금: 소득세 3% + 지방소득세(소득세의 10%), 10원 미만 절사. 소득세가 1,000원 미만이면 공제하지 않아요." : "세금을 공제하지 않고 계산했어요."}
+    </p>
+
+    <h3>근무 상세</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>날짜</th><th>이름</th><th>시간</th><th class="num">근무시간</th><th class="num">금액</th></tr></thead>
+        <tbody>${detail || `<tr><td colspan="5" class="empty">이 달의 근무 기록이 없습니다.</td></tr>`}</tbody>
       </table>
     </div>`,
   );
+}
+
+// ---------- 엑셀 ----------
+
+function loadXlsx() {
+  if (window.XLSX) return Promise.resolve(window.XLSX);
+  return new Promise((resolve, reject) => {
+    const el = document.createElement("script");
+    el.src = XLSX_SRC;
+    el.onload = () => resolve(window.XLSX);
+    el.onerror = () => reject(new Error("엑셀 라이브러리를 불러오지 못했어요. 인터넷 연결을 확인해주세요."));
+    document.head.appendChild(el);
+  });
+}
+
+async function exportXlsx(button) {
+  const { month, employeeId } = state.payroll;
+  const { recs, rows, total } = payrollFor(month, employeeId);
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = "만드는 중…";
+  try {
+    const XLSX = await loadXlsx();
+    const round2 = (n) => Math.round(n * 100) / 100;
+
+    const summary = [
+      ["이름", "근무일", "근무시간", "시급", "기본급", "주휴수당", "지급총액", "소득세", "지방소득세", "실지급액"],
+      ...rows.map((r) => [r.emp.name, r.days, round2(r.hours), r.emp.hourlyWage, r.base, r.weekly.total, r.gross, r.income, r.local, r.net]),
+    ];
+    if (rows.length > 1) summary.push(["합계", total.days, round2(total.hours), "", total.base, total.weekly, total.gross, total.income, total.local, total.net]);
+
+    const detail = [
+      ["날짜", "요일", "이름", "출근", "퇴근", "근무시간", "시급", "금액"],
+      ...recs.map((r) => {
+        const emp = employeeById(r.employeeId);
+        const h = hoursBetween(r.clockIn, r.clockOut);
+        return [r.date, WEEKDAYS[weekdayOf(r.date)], emp.name, formatTime(r.clockIn), formatTime(r.clockOut), round2(h), emp.hourlyWage, Math.round(h * emp.hourlyWage)];
+      }),
+    ];
+
+    const weekly = [["이름", "주 시작(월)", "주 끝(일)", "근무시간", "주휴시간", "주휴수당", "비고"]];
+    for (const r of rows) {
+      for (const w of r.weekly.weeks) weekly.push([r.emp.name, w.mon, w.sun, round2(w.hours), round2(w.allowHours), w.amount, w.reason || ""]);
+    }
+
+    const sheet = (aoa, widths) => {
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws["!cols"] = widths.map((wch) => ({ wch }));
+      return ws;
+    };
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, sheet(summary, [10, 8, 10, 9, 12, 12, 12, 10, 11, 12]), "급여 정산");
+    XLSX.utils.book_append_sheet(wb, sheet(detail, [12, 6, 10, 8, 8, 10, 9, 11]), "근무 상세");
+    XLSX.utils.book_append_sheet(wb, sheet(weekly, [10, 12, 12, 10, 10, 11, 16]), "주휴수당 내역");
+    const who = employeeId ? `_${employeeById(employeeId).name}` : "";
+    XLSX.writeFile(wb, `근무기록_${month}${who}.xlsx`);
+  } catch (err) {
+    window.alert(err.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = label;
+  }
 }
 
 // ---------- 라우팅 ----------
@@ -697,33 +863,22 @@ function navigate(hash) {
 window.addEventListener("hashchange", () => {
   resetDayUi();
   state.unlockOpen = false;
-  state.pin = "";
   render();
 });
 
 // ---------- PIN ----------
 
-function submitPin() {
-  if (state.pin === ADMIN_PIN) {
+function submitPin(value) {
+  if (value === ADMIN_PIN) {
     setAdmin(true);
     state.unlockOpen = false;
-    state.pin = "";
     navigate("#/admin/employees");
     return;
   }
-  state.pin = "";
   render();
   const input = document.getElementById("pin-input");
   input?.classList.add("shake");
   setTimeout(() => input?.classList.remove("shake"), 900);
-}
-
-function enterKey(key) {
-  if (key === "submit") return submitPin();
-  if (key === "clear") state.pin = state.pin.slice(0, -1);
-  else state.pin = (state.pin + key).slice(0, PIN_LENGTH);
-  if (state.pin.length >= PIN_LENGTH) return submitPin();
-  render();
 }
 
 // ---------- 이벤트 ----------
@@ -763,18 +918,9 @@ function closePanel() {
 }
 
 app.addEventListener("click", (e) => {
-  const keyBtn = e.target.closest("[data-key]");
-  if (keyBtn) {
-    enterKey(keyBtn.dataset.key);
-    return;
-  }
-
-  // 키패드 바깥을 누르면 PIN 입력 닫기
+  // PIN 입력칸 바깥을 누르면 닫기
   const closedUnlock = state.unlockOpen && !e.target.closest("#unlock");
-  if (closedUnlock) {
-    state.unlockOpen = false;
-    state.pin = "";
-  }
+  if (closedUnlock) state.unlockOpen = false;
 
   const cell = e.target.closest("[data-date]");
   if (cell) {
@@ -792,7 +938,6 @@ app.addEventListener("click", (e) => {
   switch (action) {
     case "open-unlock":
       state.unlockOpen = true;
-      state.pin = "";
       break;
     case "prev-month":
     case "next-month": {
@@ -879,9 +1024,13 @@ app.addEventListener("click", (e) => {
       save();
       break;
     }
-    case "export-csv":
-      exportCsv();
+    case "export-xlsx":
+      exportXlsx(el);
       return;
+    case "payroll-prev":
+    case "payroll-next":
+      state.payroll.month = shiftMonth(state.payroll.month, action === "payroll-prev" ? -1 : 1);
+      break;
     case "reset-data":
       if (!window.confirm("출근 기록과 수정한 내용을 모두 지우고 처음 근무표로 되돌릴까요?")) return;
       store = initialData();
@@ -896,25 +1045,12 @@ app.addEventListener("click", (e) => {
 });
 
 app.addEventListener("keydown", (e) => {
-  if (!state.unlockOpen) return;
-  if (/^[0-9]$/.test(e.key)) {
-    e.preventDefault();
-    enterKey(e.key);
-  } else if (e.key === "Backspace") {
-    e.preventDefault();
-    enterKey("clear");
-  } else if (e.key === "Enter") {
-    submitPin();
-  } else if (e.key === "Escape") {
+  if (e.target.id !== "pin-input") return;
+  if (e.key === "Enter") submitPin(e.target.value);
+  else if (e.key === "Escape") {
     state.unlockOpen = false;
-    state.pin = "";
     render();
   }
-});
-
-// 키패드 버튼이 입력창 포커스를 뺏지 않도록
-app.addEventListener("pointerdown", (e) => {
-  if (e.target.closest("[data-key]")) e.preventDefault();
 });
 
 app.addEventListener("submit", (e) => {
@@ -970,9 +1106,14 @@ app.addEventListener("change", (e) => {
     t.value = formatRange(emp.weekly[wd]);
     return;
   }
-  const filter = t.dataset.filter;
-  if (filter) {
-    state.records[filter] = t.value;
+  if (t.dataset.payroll) {
+    state.payroll[t.dataset.payroll] = t.value;
+    render();
+    return;
+  }
+  if (t.dataset.setting) {
+    store.settings = { ...store.settings, [t.dataset.setting]: t.value };
+    save();
     render();
   }
 });
@@ -1008,25 +1149,16 @@ function alertField(id) {
 // 숫자만 남기고 두 자리 뒤에 ":" 를 자동으로 넣는다
 app.addEventListener("input", (e) => {
   const t = e.target;
+  if (t.id === "pin-input") {
+    t.value = t.value.replace(/\D/g, "").slice(0, PIN_LENGTH);
+    if (t.value.length === PIN_LENGTH) submitPin(t.value);
+    return;
+  }
   if (!t.classList.contains("time")) return;
   t.classList.remove("invalid");
   const digits = t.value.replace(/\D/g, "").slice(0, 4);
   t.value = digits.length > 2 ? `${digits.slice(0, 2)}:${digits.slice(2)}` : digits;
 });
-
-function exportCsv() {
-  const { from, to } = state.records;
-  const header = ["날짜", "이름", "출근", "퇴근", "근무시간", "급여"];
-  const rows = queryRecords().map((r) => [r.date, r.employeeName, formatTime(r.clockIn), formatTime(r.clockOut), r.hours.toFixed(2), String(r.pay)]);
-  const csv = [header, ...rows].map((row) => row.join(",")).join("\n");
-  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `attendance_${from}_${to}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
 
 // 화면이 넓어지면 모바일 날짜 페이지를 홈 패널로, 좁아지면 그 반대로 전환
 window.matchMedia("(min-width: 768px)").addEventListener("change", (mq) => {

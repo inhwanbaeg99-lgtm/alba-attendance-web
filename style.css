@@ -175,7 +175,7 @@ ul {
 
 .pin-input {
   height: 100%;
-  width: 184px;
+  width: 160px;
   border: 0;
   border-radius: 8px;
   background: var(--paper);
@@ -184,7 +184,15 @@ ul {
   font-weight: 700;
   letter-spacing: 0.2em;
   outline: none;
+  color: var(--ink);
   transition: background-color 0.3s, color 0.3s;
+}
+
+.pin-input::placeholder {
+  letter-spacing: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-sub);
 }
 
 .pin-input.shake {
@@ -204,42 +212,6 @@ ul {
   .pin-input.shake {
     animation: none;
   }
-}
-
-.keypad {
-  position: absolute;
-  left: 0;
-  top: 42px;
-  z-index: 30;
-  width: min(220px, calc(100vw - 2rem));
-  border-radius: 12px;
-  background: var(--paper);
-  padding: 8px;
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 4px;
-}
-
-.keypad button {
-  height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 8px;
-  font-size: 22px;
-  font-weight: 600;
-  color: #777;
-  transition: color 0.15s, background-color 0.15s;
-}
-
-.keypad button:hover {
-  color: var(--ink);
-}
-
-.keypad button:active {
-  background: var(--accent-soft);
-  color: var(--ink);
 }
 
 /* ---------- 달력 ---------- */
@@ -783,46 +755,35 @@ ul {
 
 
 /* ---------- 관리자 ---------- */
-.admin-header {
-  border-bottom: 1px solid var(--line);
-}
-
-.admin-header-inner {
-  max-width: 1200px;
-  margin: 0 auto;
+.admin-bottom {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 16px;
-  padding: 16px;
+  justify-content: center;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
 }
 
-.admin-brand {
-  font-size: 18px;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  color: var(--ink);
-  text-decoration: none;
-}
-
-.admin-nav {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 20px;
+.admin-bottom a,
+.admin-bottom button {
+  border-radius: 999px;
+  padding: 10px 22px;
   font-size: 14px;
-  font-weight: 500;
-}
-
-.admin-nav a,
-.admin-nav button {
+  font-weight: 600;
   color: var(--ink-sub);
   text-decoration: none;
 }
 
-.admin-nav a:hover,
-.admin-nav button:hover,
-.admin-nav a.active {
+.admin-bottom a:hover,
+.admin-bottom button:hover {
+  color: var(--ink);
+}
+
+.admin-bottom a.active {
+  background: var(--paper);
   color: var(--ink);
 }
 
@@ -838,6 +799,48 @@ ul {
   margin: 0 0 24px;
   font-size: 20px;
   font-weight: 700;
+}
+
+.admin-main h3 {
+  margin: 32px 0 12px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.month-nav {
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.month-nav h2 {
+  margin: 0;
+}
+
+.month-nav .round-btn {
+  background: var(--paper);
+}
+
+th.num,
+td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+td.strong {
+  font-weight: 700;
+}
+
+.total-row td {
+  font-weight: 700;
+  background: var(--bg);
+}
+
+.small-hint {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .toolbar {
