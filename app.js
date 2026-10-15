@@ -303,9 +303,7 @@ if (!store.scheduleMeta) {
   store.scheduleMeta = structuredClone(INITIAL_SCHEDULE_META);
 }
 // 예전 데이터: 기간에 연도가 없으면 앞에 붙인다 ("10. 5 ~ 11. 8" → "2026. 10. 5 ~ 11. 8")
-if (store.scheduleMeta?.period && !/\d{4}/.test(store.scheduleMeta.period) && /\d/.test(store.scheduleMeta.period)) {
-  store.scheduleMeta.period = `${scheduleStart().slice(0, 4)}. ${store.scheduleMeta.period.trim()}`;
-}
+pinPeriodYear();
 // 예전 데이터: 오늘 이전 기록은 근무표로 자동 채운 것으로 표시
 if (!store.autoMarked) {
   const today = todayDateString();
@@ -329,6 +327,13 @@ save();
 // - 날짜별로 따로 수정한 날(store.shifts)은 건드리지 않는다
 // - 자동으로 채운 지난 기록: 시간 변경 / 근무 추가 시 생성 / 근무 삭제 시 제거
 // - 직접 출근한 기록: 시간만 맞추고 지우지는 않는다
+// 기간에 연도가 없으면 지금 판단한 연도를 앞에 붙여 고정한다.
+// (몇 달 뒤에 다시 판단하면 해가 바뀌어 보일 수 있으므로 저장할 때 박아 둔다)
+function pinPeriodYear() {
+  const period = store.scheduleMeta?.period;
+  if (period && !/\d{4}/.test(period) && /\d/.test(period)) store.scheduleMeta.period = `${scheduleStart().slice(0, 4)}. ${period.trim()}`;
+}
+
 function scheduleStart() {
   const period = store.scheduleMeta?.period ?? "";
   const pad = (n) => n.padStart(2, "0");
@@ -1359,6 +1364,7 @@ function tempSaveSchedule() {
 function commitSchedule() {
   const work = schedWork();
   if (work.meta) store.scheduleMeta = work.meta; // 기간이 바뀌면 적용 시작일도 바뀌므로 먼저
+  pinPeriodYear();
   for (const [empId, days] of Object.entries(work.weekly)) {
     const emp = employeeById(empId);
     if (!emp) continue;
