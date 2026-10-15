@@ -339,6 +339,7 @@ function syncWeekday(emp, wd) {
     if (String(weekdayOf(date)) !== String(wd) || store.shifts[date]?.[emp.id]) continue;
     const shift = emp.weekly[wd];
     const rec = recordFor(emp.id, date);
+    if (rec?.edited) continue; // 관리자가 근무 기록에서 직접 고친 날
     if (shift) {
       const clockIn = kstIso(date, shift.start);
       const clockOut = endIso(date, shift.start, shift.end);
@@ -848,23 +849,50 @@ function monthDays(ym) {
 }
 
 // 월별 근무표: 한 사람이 한 줄, 1일~말일 칸에 그날 근무시간
-function timesheet(ym, employeeId) {
+// includeAll: 기록이 없어도 재직 중인 알바는 줄을 보여준다 (화면에서 시간을 직접 입력할 수 있게)
+function timesheet(ym, employeeId, { includeAll = false } = {}) {
   const days = monthDays(ym);
   const recs = monthRecords(ym, employeeId);
   const ids = new Set(recs.map((r) => r.employeeId));
-  const people = store.employees.filter((e) => ids.has(e.id));
+  const people = store.employees.filter(
+    (e) => ids.has(e.id) || (includeAll && e.active && !isManager(e) && (!employeeId || e.id === employeeId)),
+  );
   const rows = people.map((emp) => {
-    const cells = days.map((d) => {
-      const rec = recs.find((r) => r.employeeId === emp.id && r.date === d);
-      return rec ? hoursBetween(rec.clockIn, rec.clockOut) : 0;
-    });
-    return { emp, cells, total: cells.reduce((a, b) => a + b, 0) };
+    const dayRecs = days.map((d) => recs.find((r) => r.employeeId === emp.id && r.date === d));
+    const cells = dayRecs.map((rec) => (rec ? hoursBetween(rec.clockIn, rec.clockOut) : 0));
+    return { emp, cells, edited: dayRecs.map((rec) => Boolean(rec?.edited)), total: cells.reduce((a, b) => a + b, 0) };
   });
   return { days, rows };
 }
 
+// "7.5", "7:30", "7" → 시간(숫자). 비우면 0, 잘못된 값은 null
+function parseHours(text) {
+  const t = String(text).trim();
+  if (!t) return 0;
+  const hm = t.match(/^(\d{1,2}):(\d{1,2})$/);
+  const h = hm ? Number(hm[1]) + Number(hm[2]) / 60 : Number(t);
+  return Number.isFinite(h) && h >= 0 && h <= 24 ? Math.round(h * 100) / 100 : null;
+}
+
+// 관리자가 근무 상세 표에서 그날 근무시간을 직접 고친다.
+// 기록이 있으면 출근 시각은 두고 퇴근 시각만 맞추고, 없으면 그날 근무 시작 시간(없으면 09:00)으로 만든다.
+// 직접 고친 기록은 이후 근무표를 바꿔도 덮어쓰지 않는다(edited).
+function setDayHours(empId, date, hours) {
+  const rec = recordFor(empId, date);
+  if (!hours) {
+    if (rec) store.records = store.records.filter((r) => r !== rec);
+    return;
+  }
+  const emp = employeeById(empId);
+  const clockIn = rec?.clockIn ?? kstIso(date, shiftFor(emp, date).start ?? "09:00");
+  const clockOut = new Date(new Date(clockIn).getTime() + hours * 3_600_000).toISOString();
+  if (rec) Object.assign(rec, { clockOut, edited: true });
+  else store.records.push({ id: uid(), employeeId: empId, date, clockIn, clockOut, createdAt: new Date().toISOString(), edited: true });
+}
+
 function renderTimesheet(ym, employeeId) {
-  const { days, rows } = timesheet(ym, employeeId);
+  const { days, rows } = timesheet(ym, employeeId, { includeAll: true });
+  const today = todayDateString();
   if (!rows.length) return `<div class="table-wrap ts-wrap"><p class="empty">이 달의 근무 기록이 없습니다.</p></div>`;
   const wkClass = (d) => {
     const wd = weekdayOf(d);
@@ -889,7 +917,13 @@ function renderTimesheet(ym, employeeId) {
             <tr>
               <td class="ts-no">${i + 1}</td>
               <td class="ts-name">${esc(r.emp.name)}</td>
-              ${r.cells.map((h, j) => `<td class="ts-day${wkClass(days[j])}">${hour1(h)}</td>`).join("")}
+              ${r.cells
+                .map((h, j) => {
+                  const d = days[j];
+                  if (d > today) return `<td class="ts-day${wkClass(d)}"></td>`;
+                  return `<td class="ts-day${wkClass(d)}${r.edited[j] ? " edited" : ""}"><input class="ts-input" type="text" inputmode="decimal" value="${hour1(h)}" data-ts-key="${r.emp.id}|${d}" aria-label="${esc(r.emp.name)} ${shortDate(d)} 근무시간" title="${r.edited[j] ? "직접 고친 시간" : ""}" /></td>`;
+                })
+                .join("")}
               <td class="ts-total">${r.total.toFixed(1)}</td>
             </tr>`,
             )
@@ -1844,6 +1878,16 @@ app.addEventListener("click", (e) => {
 });
 
 app.addEventListener("keydown", (e) => {
+  // 근무 상세 칸: Enter 로 저장하고 아래 칸으로
+  if (e.target.dataset?.tsKey && e.key === "Enter") {
+    e.preventDefault();
+    const [empId, date] = e.target.dataset.tsKey.split("|");
+    const inputs = [...document.querySelectorAll(`[data-ts-key$="|${date}"]`)];
+    const below = inputs[inputs.indexOf(e.target) + 1];
+    (below ?? e.target).focus();
+    if (!below) e.target.blur();
+    return;
+  }
   if (e.target.id !== "pin-input") return;
   if (e.key === "Enter") submitPin(e.target.value);
   else if (e.key === "Escape") {
@@ -1923,6 +1967,35 @@ app.addEventListener("change", (e) => {
     const item = state.allowDraft[Number(t.dataset.index)];
     item[t.dataset.allow] = t.dataset.allow === "amount" ? parseMoney(t.value) : t.value.trim();
     render();
+    return;
+  }
+  if (t.dataset.tsKey) {
+    const hours = parseHours(t.value);
+    if (hours === null) {
+      // 잘못 입력하면 빨간 테두리 후 원래 숫자로 되돌린다
+      t.classList.add("invalid");
+      setTimeout(() => {
+        t.classList.remove("invalid");
+        t.value = t.defaultValue;
+      }, 1200);
+      return;
+    }
+    const [empId, date] = t.dataset.tsKey.split("|");
+    setDayHours(empId, date, hours);
+    save();
+    // Tab 으로 다음 칸에 가 있는 포커스를 다시 그린 뒤에도 유지
+    setTimeout(() => {
+      const key = document.activeElement?.dataset?.tsKey;
+      const scrollX = document.querySelector(".ts-wrap")?.scrollLeft ?? 0;
+      render();
+      const wrap = document.querySelector(".ts-wrap");
+      if (wrap) wrap.scrollLeft = scrollX;
+      if (key) {
+        const el = document.querySelector(`[data-ts-key="${key}"]`);
+        el?.focus();
+        el?.select();
+      }
+    });
     return;
   }
   if (t.dataset.payroll) {

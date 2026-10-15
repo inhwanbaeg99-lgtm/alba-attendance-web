@@ -1654,3 +1654,40 @@ td.name {
     padding-top: 96px;
   }
 }
+
+/* 근무 상세: 칸에 근무시간 직접 입력 */
+.timesheet td.ts-day {
+  padding: 0;
+}
+
+.ts-input {
+  width: 100%;
+  min-width: 32px;
+  height: 30px;
+  border: 0;
+  background: transparent;
+  text-align: center;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  outline: none;
+}
+
+.ts-input:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.ts-input:focus {
+  background: var(--bg);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.ts-input.invalid {
+  box-shadow: inset 0 0 0 2px var(--red);
+}
+
+/* 직접 고친 칸 */
+.timesheet td.edited .ts-input {
+  color: var(--accent);
+  font-weight: 700;
+}
