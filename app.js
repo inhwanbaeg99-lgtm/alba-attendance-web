@@ -120,6 +120,28 @@ const INITIAL_COLORS = {
   매니저: "#ffffff",
 };
 
+// 사람이 늘어나면 이 순서대로 아직 안 쓴 색을 준다 (앞 9개는 기존 근무표 색)
+const PALETTE = [
+  "#fff2cc", "#d0cece", "#7030a0", "#bdd7ee", "#ffff00", "#8ea9db", "#c6e0b4", "#2e75b6", "#ffe699",
+  "#f8cbad", "#a9d08e", "#ff99cc", "#9bc2e6", "#ffc000", "#b4a7d6", "#c00000", "#00b0f0", "#ffd966",
+  "#548235", "#f4b183", "#d9d2e9", "#70ad47", "#ff7c80", "#dbdbdb",
+];
+
+// 직원마다 겹치지 않는 색을 자동으로 정한다. 이미 정해진 색은 유지.
+function ensureColors(data = store) {
+  const used = new Set();
+  for (const e of data.employees) {
+    if (isManager(e)) {
+      e.color = "#ffffff";
+      continue;
+    }
+    if (!e.color || used.has(e.color) || e.color === "#ffffff") {
+      e.color = PALETTE.find((c) => !used.has(c)) ?? `hsl(${(used.size * 47) % 360} 70% 75%)`;
+    }
+    used.add(e.color);
+  }
+}
+
 // 매니저는 근무표에만 나오고 출근·급여에서는 빠진다
 const MANAGER_SCHEDULE = { 1: "10:00~18:00", 2: "10:00~18:00", 5: "10:00~17:00", 6: "08:00~16:00", 0: "08:00~16:00" };
 const INITIAL_SCHEDULE_META = { period: "10. 5 ~ 11. 8", notes: { 1: "24", 2: "23", 3: "26", 4: "27", 5: "27", 6: "34", 0: "32" } };
@@ -295,6 +317,7 @@ if (!store.orderSet) {
   store.employees.sort((a, b) => rank(a) - rank(b));
   store.orderSet = true;
 }
+ensureColors();
 save();
 
 // ---------- 근무표 변경 → 근무 기록 연동 ----------
@@ -649,7 +672,7 @@ function renderEmployees() {
     .map(
       (e) => `
       <tr>
-        <td class="name"><span class="name-cell"><input type="color" class="swatch" value="${e.color || "#ffffff"}" data-color="${e.id}" aria-label="${esc(e.name)} 근무표 색" />${esc(e.name)}</span><div class="muted small">${esc(e.phone || "")}</div></td>
+        <td class="name"><span class="name-cell"><span class="swatch" style="background:${e.color || "#ffffff"}" title="근무표 색 (자동)"></span>${esc(e.name)}</span><div class="muted small">${esc(e.phone || "")}</div></td>
         ${order
           .map(
             (wd) =>
@@ -674,7 +697,7 @@ function renderEmployees() {
       <div><label for="f-wage">시급(원)</label><input id="f-wage" class="field" style="width:112px" type="number" value="${DEFAULT_WAGE}" required /></div>
       <button type="submit" class="pill">추가</button>
     </form>
-    <p class="hint">요일 칸에 <b>7-12</b>, <b>18-2230</b> 처럼 입력하면 근무 시간이 저장돼요. 비우면 쉬는 날이에요. 이름 앞 색은 근무표 색이고, 근무표에서 같은 시각에 시작하면 위에 있는 사람이 왼쪽 칸에 들어가요.</p>
+    <p class="hint">요일 칸에 <b>7-12</b>, <b>18-2230</b> 처럼 입력하면 근무 시간이 저장돼요. 비우면 쉬는 날이에요. 이름 앞 색은 근무표 색이에요(자동으로 겹치지 않게 정해져요). 근무표에서 같은 시각에 시작하면 위에 있는 사람이 왼쪽 칸에 들어가요.</p>
     <div class="table-wrap">
       <table class="schedule">
         <thead><tr><th>이름</th>${order.map((wd) => `<th class="${wd === 0 ? "rest" : ""}">${WEEKDAYS[wd]}</th>`).join("")}<th>시급</th><th>상태</th><th>구분</th><th>관리</th></tr></thead>
@@ -1223,7 +1246,7 @@ function renderScheduleSheet() {
               const who = occupant(col, row);
               const group = rows.filter((r) => hourOf(r) === hourOf(row));
               const gi = group.indexOf(row);
-              const sameAll = group.length > 1 && group.every((r) => occupant(col, r) === who);
+              const sameAll = Boolean(who) && group.length > 1 && group.every((r) => occupant(col, r) === who);
               if (sameAll && gi > 0) return "";
               const span = sameAll ? ` rowspan="${group.length}"` : "";
               const slot = `data-action="edit-slot" data-wd="${d.wd}" data-start="${row.start}"`;
@@ -1583,6 +1606,8 @@ app.addEventListener("click", (e) => {
     case "toggle-role": {
       const emp = employeeById(id);
       emp.role = isManager(emp) ? undefined : "manager";
+      if (!isManager(emp)) emp.color = null;
+      ensureColors();
       save();
       break;
     }
@@ -1673,6 +1698,7 @@ app.addEventListener("submit", (e) => {
     active: true,
     weekly: {},
   });
+  ensureColors();
   save();
   render();
 });
@@ -1702,11 +1728,6 @@ app.addEventListener("change", (e) => {
       }
     }
     t.value = formatRange(emp.weekly[wd]);
-    return;
-  }
-  if (t.dataset.color) {
-    employeeById(t.dataset.color).color = t.value;
-    save();
     return;
   }
   if (t.dataset.note !== undefined || t.dataset.meta) {
@@ -1752,6 +1773,7 @@ function addExtra() {
   if (!emp) {
     emp = { id: uid(), name, phone: null, hourlyWage: DEFAULT_WAGE, active: true, weekly: {} };
     store.employees.push(emp);
+    ensureColors();
   }
   setShift(emp.id, activeDate(), start, end);
   save();
