@@ -492,7 +492,7 @@ function renderLock() {
   return `
     <div class="lock-page">
       <p class="lock-title">관리자</p>
-      <input id="pin-input" class="pin-input" type="password" inputmode="numeric" maxlength="${PIN_LENGTH}" autocomplete="off" placeholder="번호 4자리" aria-label="관리자 번호" />
+      <input id="pin-input" class="pin-input" type="password" inputmode="numeric" maxlength="${PIN_LENGTH}" autocomplete="off" aria-label="관리자 번호" />
     </div>`;
 }
 
