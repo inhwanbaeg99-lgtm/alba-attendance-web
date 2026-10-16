@@ -539,7 +539,7 @@ function renderCalendar() {
         ...entries.slice(0, MAX_VISIBLE).map((r) => {
           const emp = employeeById(r.employeeId);
           const diff = diffClass(emp, date, hoursBetween(r.clockIn, r.clockOut));
-          return `<span class="chip${diff}">${esc(emp.name)} <span class="chip-time">${formatTime(r.clockIn)}~${formatTime(r.clockOut)}</span></span>`;
+          return `<span class="chip">${esc(emp.name)} <span class="chip-time${diff}">${formatTime(r.clockIn)}~${formatTime(r.clockOut)}</span></span>`;
         }),
         entries.length > MAX_VISIBLE ? `<span class="chip more">+${entries.length - MAX_VISIBLE}명</span>` : "",
       ].join("");
