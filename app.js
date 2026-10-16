@@ -2,13 +2,10 @@
 // 서버가 없으므로 데이터는 이 브라우저의 localStorage에 저장된다.
 
 const TIME_ZONE = "Asia/Seoul";
-const ADMIN_PIN = "1234";
 const STORE_KEY = "alba-attendance:v5";
 const DEFAULT_WAGE = 10320; // 2026년 최저시급
-const ADMIN_KEY = "alba-attendance:admin";
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 const MAX_VISIBLE = 5;
-const PIN_LENGTH = 4;
 const PANEL_ANIM_MS = 320;
 
 // 2026년 대한민국 법정공휴일 (대체공휴일 포함)
@@ -209,7 +206,13 @@ function fixPressedTimes() {
   store.timesFixed = true;
 }
 
+// 이 기기에 캐시로 저장하고, 바뀐 부분을 온라인 저장소에 올린다
 function save() {
+  saveCache();
+  pushChanges();
+}
+
+function saveCache() {
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify(store));
   } catch {}
@@ -291,19 +294,9 @@ function removeRecord(empId, date) {
   store.absent = { ...store.absent, [`${empId}|${date}`]: true };
 }
 
+// 관리자 = Firebase 에 매니저 이메일로 로그인한 상태 (관리자 사이트에서만)
 function isAdmin() {
-  try {
-    return sessionStorage.getItem(ADMIN_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function setAdmin(on) {
-  try {
-    if (on) sessionStorage.setItem(ADMIN_KEY, "1");
-    else sessionStorage.removeItem(ADMIN_KEY);
-  } catch {}
+  return ADMIN_SITE && Boolean(cloud?.auth.currentUser);
 }
 
 fixPressedTimes();
@@ -487,12 +480,25 @@ const state = {
 
 // ---------- 화면: 홈 ----------
 
-// 관리자 사이트 첫 화면: 번호 4자리를 치면 바로 들어간다
+// 관리자 사이트 첫 화면: 매니저 이메일·비밀번호로 로그인
 function renderLock() {
+  if (!state.authReady) return `<div class="lock-page"><p class="lock-title">MGC · 춘천온의파크점</p></div>`;
+  if (!cloud) {
+    return `
+      <div class="lock-page">
+        <p class="lock-title">MGC · 춘천온의파크점</p>
+        <p class="error">인터넷 연결을 확인한 뒤 새로고침해주세요.</p>
+      </div>`;
+  }
   return `
     <div class="lock-page">
       <p class="lock-title">MGC · 춘천온의파크점</p>
-      <input id="pin-input" class="pin-input" type="password" inputmode="numeric" maxlength="${PIN_LENGTH}" autocomplete="off" aria-label="관리자 번호" />
+      <form class="lock-form" id="login-form">
+        <input id="login-email" class="field" type="email" autocomplete="username" placeholder="이메일" aria-label="이메일" required />
+        <input id="login-password" class="field" type="password" autocomplete="current-password" placeholder="비밀번호" aria-label="비밀번호" required />
+        <button type="submit" class="btn-primary"${state.loggingIn ? " disabled" : ""}>${state.loggingIn ? "로그인 중…" : "로그인"}</button>
+        ${state.error ? `<p class="error">${esc(state.error)}</p>` : ""}
+      </form>
     </div>`;
 }
 
@@ -1664,7 +1670,7 @@ function render() {
     }
   }
 
-  if (r.name === "lock") document.getElementById("pin-input")?.focus();
+  if (r.name === "lock" && !document.getElementById("login-email")?.value) document.getElementById("login-email")?.focus();
 }
 
 function navigate(hash) {
@@ -1682,18 +1688,39 @@ window.addEventListener("hashchange", () => {
   render();
 });
 
-// ---------- PIN ----------
+// ---------- 로그인 ----------
 
-function submitPin(value) {
-  if (value === ADMIN_PIN) {
-    setAdmin(true);
-    navigate("#/employees");
-    return;
-  }
+const LOGIN_ERRORS = {
+  "auth/invalid-credential": "이메일 또는 비밀번호가 맞지 않아요.",
+  "auth/wrong-password": "이메일 또는 비밀번호가 맞지 않아요.",
+  "auth/user-not-found": "이메일 또는 비밀번호가 맞지 않아요.",
+  "auth/invalid-email": "이메일 형식을 확인해주세요.",
+  "auth/too-many-requests": "잠시 후 다시 시도해주세요.",
+  "auth/network-request-failed": "인터넷 연결을 확인해주세요.",
+};
+
+async function login() {
+  const email = document.getElementById("login-email").value.trim();
+  const password = document.getElementById("login-password").value;
+  state.loggingIn = true;
+  state.error = "";
   render();
-  const input = document.getElementById("pin-input");
-  input?.classList.add("shake");
-  setTimeout(() => input?.classList.remove("shake"), 900);
+  try {
+    // 창을 닫으면 로그아웃 (매장 공용 컴퓨터)
+    await cloud.auth.setPersistence(firebase.auth.Auth.Persistence.SESSION);
+    await cloud.auth.signInWithEmailAndPassword(email, password);
+    state.loggingIn = false;
+    navigate("#/employees");
+  } catch (err) {
+    state.loggingIn = false;
+    state.error = LOGIN_ERRORS[err.code] ?? "로그인하지 못했어요. 다시 시도해주세요.";
+    render();
+    const pw = document.getElementById("login-password");
+    if (pw) {
+      document.getElementById("login-email").value = email;
+      pw.focus();
+    }
+  }
 }
 
 // ---------- 이벤트 ----------
@@ -1832,9 +1859,8 @@ app.addEventListener("click", (e) => {
       break;
     }
     case "logout":
-      setAdmin(false);
+      cloud?.auth.signOut();
       navigate("#/");
-      render();
       return;
     case "toggle-active": {
       const emp = employeeById(id);
@@ -1940,10 +1966,15 @@ app.addEventListener("click", (e) => {
 });
 
 app.addEventListener("keydown", (e) => {
-  if (e.target.id === "pin-input" && e.key === "Enter") submitPin(e.target.value);
+
 });
 
 app.addEventListener("submit", (e) => {
+  if (e.target.id === "login-form") {
+    e.preventDefault();
+    login();
+    return;
+  }
   if (e.target.id === "slot-form") {
     e.preventDefault();
     finishSlot();
@@ -2070,11 +2101,6 @@ app.addEventListener("input", (e) => {
     t.value = formatMoney(t.value);
     return;
   }
-  if (t.id === "pin-input") {
-    t.value = t.value.replace(/\D/g, "").slice(0, PIN_LENGTH);
-    if (t.value.length === PIN_LENGTH) submitPin(t.value);
-    return;
-  }
   if (!t.classList.contains("time")) return;
   t.classList.remove("invalid");
   const digits = t.value.replace(/\D/g, "").slice(0, 4);
@@ -2110,3 +2136,216 @@ app.addEventListener("input", (e) => {
 app.addEventListener("change", (e) => {
   if (e.target.id === "slot-emp") liveSlot();
 });
+
+// ---------- 온라인 저장소 (Firebase Realtime Database) ----------
+// 모든 기기가 같은 기록을 본다. 이 기기의 localStorage 는 빠르게 띄우기 위한 캐시일 뿐이다.
+//   public/  누구나 읽기 — 직원 이름·근무 요일, 출근 기록, 날짜별 근무 시간 (달력에 필요한 것)
+//   private/ 매니저만 — 전화번호·시급, 수당, 세금 설정, 근무표 기간·초안 등
+// 항목마다 JSON 문자열로 저장해서, 바뀐 항목만 올리고 받는다.
+
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyDGqqPMYw8roIKplItFnPLoDsN-d3ZwUeI",
+  authDomain: "mgc-attendance.firebaseapp.com",
+  databaseURL: "https://mgc-attendance-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "mgc-attendance",
+  storageBucket: "mgc-attendance.firebasestorage.app",
+  messagingSenderId: "1098536533178",
+  appId: "1:1098536533178:web:065cb84cf2e526145a1683",
+};
+
+var cloud = null; // { auth, db } — SDK 를 못 불러오면 이 기기에만 저장
+var remote = { pub: null, priv: null, pubLoaded: false, privLoaded: false, last: {}, seedAsked: false };
+
+const PUBLIC_EMP_KEYS = ["id", "name", "active", "role", "color", "weekly", "weeklyBase", "weeklyHistory"];
+
+// store → { "경로": "JSON 문자열" }
+function flattenStore(withPrivate) {
+  const out = {};
+  const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => obj[k] !== undefined).map((k) => [k, obj[k]]));
+  for (const e of store.employees) {
+    out[`public/employees/${e.id}`] = JSON.stringify(pick(e, PUBLIC_EMP_KEYS));
+    if (withPrivate) out[`private/employees/${e.id}`] = JSON.stringify({ phone: e.phone ?? null, hourlyWage: e.hourlyWage ?? DEFAULT_WAGE });
+  }
+  out["public/order"] = JSON.stringify(store.employees.map((e) => e.id));
+  for (const r of store.records) out[`public/records/${r.id}`] = JSON.stringify(r);
+  for (const [date, byEmp] of Object.entries(store.shifts ?? {})) {
+    if (Object.keys(byEmp ?? {}).length) out[`public/shifts/${date}`] = JSON.stringify(byEmp);
+  }
+  if (withPrivate) {
+    const { scheduleMeta, settings, allowances, scheduleDraft, absent } = store;
+    out["private/main"] = JSON.stringify({ scheduleMeta, settings, allowances, scheduleDraft, absent });
+  }
+  return out;
+}
+
+// 받은 데이터 → { "경로": "JSON 문자열" } (마지막으로 맞춰 둔 상태)
+function flattenRemote() {
+  const out = {};
+  const walk = (prefix, obj) => {
+    for (const [k, v] of Object.entries(obj ?? {})) out[`${prefix}/${k}`] = v;
+  };
+  const pub = remote.pub ?? {};
+  walk("public/employees", pub.employees);
+  walk("public/records", pub.records);
+  walk("public/shifts", pub.shifts);
+  if (pub.order) out["public/order"] = pub.order;
+  if (remote.privLoaded) {
+    const priv = remote.priv ?? {};
+    walk("private/employees", priv.employees);
+    if (priv.main) out["private/main"] = priv.main;
+  }
+  return out;
+}
+
+function parse(json, fallback) {
+  try {
+    return JSON.parse(json) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+// 받은 데이터로 store 를 다시 만든다
+function storeFromRemote() {
+  const pub = remote.pub ?? {};
+  const priv = remote.privLoaded ? (remote.priv ?? {}) : null;
+  const order = parse(pub.order, []);
+  const rank = (id) => (order.indexOf(id) < 0 ? 1e6 : order.indexOf(id));
+  const employees = Object.values(pub.employees ?? {})
+    .map((json) => parse(json, null))
+    .filter(Boolean)
+    .sort((a, b) => rank(a.id) - rank(b.id))
+    .map((e) => {
+      const p = priv ? parse(priv.employees?.[e.id], {}) : employeeById(e.id) ?? {};
+      return { weekly: {}, ...e, phone: p.phone ?? null, hourlyWage: p.hourlyWage ?? DEFAULT_WAGE };
+    });
+  const main = priv ? parse(priv.main, {}) : store;
+  return {
+    employees,
+    records: Object.values(pub.records ?? {}).map((json) => parse(json, null)).filter(Boolean),
+    shifts: Object.fromEntries(Object.entries(pub.shifts ?? {}).map(([d, json]) => [d, parse(json, {})])),
+    scheduleMeta: main.scheduleMeta ?? store.scheduleMeta,
+    settings: main.settings,
+    allowances: main.allowances,
+    scheduleDraft: main.scheduleDraft,
+    absent: main.absent,
+    // 이미 정리된 데이터이므로 예전 데이터 정리는 다시 하지 않는다
+    filledFrom: FILL_FROM,
+    autoMarked: true,
+    orderSet: true,
+    timesFixed: true,
+  };
+}
+
+const remoteHasData = () => Boolean(remote.pub?.employees);
+
+// 바뀐 항목만 올린다
+function pushChanges() {
+  if (!cloud || !remote.pubLoaded) return; // 처음 받기 전에는 올리지 않는다 (예전 캐시로 덮어쓰지 않게)
+  const admin = isAdmin();
+  if (!remoteHasData() && !admin) return; // 비어 있으면 매니저가 처음 올린다
+  const withPrivate = admin && remote.privLoaded;
+  const now = flattenStore(withPrivate);
+  const updates = {};
+  for (const [k, v] of Object.entries(now)) if (remote.last[k] !== v) updates[k] = v;
+  for (const k of Object.keys(remote.last)) {
+    if (!(k in now) && (withPrivate || !k.startsWith("private/"))) updates[k] = null;
+  }
+  if (!Object.keys(updates).length) return;
+  for (const [k, v] of Object.entries(updates)) {
+    if (v === null) delete remote.last[k];
+    else remote.last[k] = v;
+  }
+  const fail = (err) => console.warn("온라인 저장 실패", err);
+  if (admin) cloud.db.ref().update(updates).catch(fail);
+  // 직원 화면은 항목마다 따로 (권한 없는 항목 하나 때문에 출근 기록까지 막히지 않게)
+  else for (const [k, v] of Object.entries(updates)) cloud.db.ref(k).set(v).catch(fail);
+}
+
+function applyRemote() {
+  remote.last = flattenRemote();
+  if (!remoteHasData()) {
+    maybeSeed();
+    return;
+  }
+  store = storeFromRemote();
+  saveCache();
+  requestRender();
+}
+
+// 온라인 저장소가 비어 있으면 매니저 로그인 시 이 기기의 기록을 올린다 (처음 한 번)
+function maybeSeed() {
+  if (!isAdmin() || !remote.pubLoaded || !remote.privLoaded || remoteHasData() || remote.seedAsked) return;
+  remote.seedAsked = true;
+  const n = store.records.length;
+  if (!window.confirm(`온라인 저장소가 비어 있어요.\n이 컴퓨터에 있는 직원 ${store.employees.length}명, 근무 기록 ${n}건을 올릴까요?\n(매장 데스크 컴퓨터에서 해주세요)`)) return;
+  const all = flattenStore(true);
+  remote.last = { ...all };
+  cloud.db.ref().update(all).catch((err) => {
+    remote.seedAsked = false;
+    window.alert("올리지 못했어요. 인터넷 연결과 Firebase 규칙을 확인해주세요.");
+    console.warn(err);
+  });
+}
+
+// 다른 기기에서 바뀐 내용이 오면 다시 그린다. 입력 중이면 입력칸을 벗어난 뒤에.
+function requestRender() {
+  const el = document.activeElement;
+  if (el && app.contains(el) && ["INPUT", "SELECT", "TEXTAREA"].includes(el.tagName)) {
+    state.renderPending = true;
+    return;
+  }
+  state.renderPending = false;
+  render();
+}
+app.addEventListener("focusout", () => {
+  setTimeout(() => {
+    if (state.renderPending) requestRender();
+  });
+});
+
+let privRef = null;
+function watchPrivate(on) {
+  if (privRef) privRef.off();
+  privRef = null;
+  remote.priv = null;
+  remote.privLoaded = false;
+  if (!on) return;
+  privRef = cloud.db.ref("private");
+  privRef.on(
+    "value",
+    (snap) => {
+      remote.priv = snap.val();
+      remote.privLoaded = true;
+      applyRemote();
+    },
+    (err) => console.warn("매니저 데이터 읽기 실패", err),
+  );
+}
+
+(function startCloud() {
+  try {
+    if (!window.firebase) throw new Error("Firebase SDK 없음");
+    firebase.initializeApp(FIREBASE_CONFIG);
+    cloud = { auth: firebase.auth(), db: firebase.database() };
+  } catch (err) {
+    console.warn("온라인 저장소를 쓰지 못해 이 기기에만 저장합니다", err);
+    state.authReady = true;
+    render();
+    return;
+  }
+  cloud.db.ref("public").on(
+    "value",
+    (snap) => {
+      remote.pub = snap.val();
+      remote.pubLoaded = true;
+      applyRemote();
+    },
+    (err) => console.warn("온라인 데이터 읽기 실패", err),
+  );
+  cloud.auth.onAuthStateChanged((user) => {
+    state.authReady = true;
+    watchPrivate(ADMIN_SITE && Boolean(user));
+    render();
+  });
+})();
