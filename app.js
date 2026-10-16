@@ -274,6 +274,23 @@ function clockIn(employeeId) {
   return null;
 }
 
+// 관리자 달력에서 그날 근무 기록을 직접 넣거나 고친다. 근무 상세·급여 정산은 기록으로 계산되므로 바로 반영된다.
+// 직접 고친 기록(edited)은 이후 근무표를 저장해도 덮어쓰지 않는다.
+function setRecordTimes(empId, date, start, end) {
+  const clockIn = kstIso(date, start);
+  const clockOut = endIso(date, start, end);
+  const rec = recordFor(empId, date);
+  if (rec) Object.assign(rec, { clockIn, clockOut, edited: true });
+  else store.records.push({ id: uid(), employeeId: empId, date, clockIn, clockOut, createdAt: new Date().toISOString(), edited: true });
+  if (store.absent) delete store.absent[`${empId}|${date}`];
+}
+
+// 그날 근무 기록을 지운다 (결근). 근무표를 다시 저장해도 자동으로 채워지지 않게 표시해 둔다.
+function removeRecord(empId, date) {
+  store.records = store.records.filter((r) => !(r.employeeId === empId && r.date === date));
+  store.absent = { ...store.absent, [`${empId}|${date}`]: true };
+}
+
 function isAdmin() {
   try {
     return sessionStorage.getItem(ADMIN_KEY) === "1";
@@ -357,7 +374,8 @@ function syncWeekday(emp, wd) {
     if (String(weekdayOf(date)) !== String(wd) || store.shifts[date]?.[emp.id]) continue;
     const shift = emp.weekly[wd];
     const rec = recordFor(emp.id, date);
-    if (rec?.edited) continue; // 관리자가 근무 기록에서 직접 고친 날
+    if (rec?.edited) continue; // 관리자가 달력에서 직접 고친 날
+    if (store.absent?.[`${emp.id}|${date}`]) continue; // 관리자가 기록을 지운 날 (결근)
     if (shift) {
       const clockIn = kstIso(date, shift.start);
       const clockOut = endIso(date, shift.start, shift.end);
@@ -391,6 +409,8 @@ function esc(s) {
 }
 
 const app = document.getElementById("app");
+// 같은 app.js 로 두 사이트: 달력(직원용, /) · 관리자(/admin/). 데이터(localStorage)는 같은 주소라 함께 쓴다.
+const ADMIN_SITE = document.body.dataset.site === "admin";
 const isDesktop = () => window.matchMedia("(min-width: 768px)").matches;
 
 // ---------- 아이콘 ----------
@@ -449,7 +469,6 @@ const state = {
   editingWhere: null, // "staff"(근무자 목록) 또는 "box"(날짜 박스)
   adding: false, // + 로 일정에 없던 인원 등록 중
   justAddedId: null, // 방금 출근한 기록 (날짜 박스에서 한 번만 애니메이션)
-  unlockOpen: false,
   error: "",
   payroll: { month: "", employeeId: "" }, // 근무 기록 화면: "2026-10"
   payslipId: null, // 급여명세서 창을 연 직원
@@ -457,7 +476,6 @@ const state = {
   schedWork: null, // 근무표 편집 초안 (저장 전)
   allowDraft: null, // 명세서 창에서 수정 중인 수당 (저장 전)
   helpOpen: {}, // ? 설명 펼침 상태
-  tsDraft: {}, // 근무 상세에서 고쳤지만 아직 저장 안 한 시간 { "직원id|날짜": 시간 }
 };
 
 {
@@ -469,13 +487,12 @@ const state = {
 
 // ---------- 화면: 홈 ----------
 
-function renderUnlock() {
-  if (!state.unlockOpen) {
-    return `<div class="unlock"><button type="button" class="unlock-title" data-action="open-unlock">MGC · 춘천온의파크점</button></div>`;
-  }
+// 관리자 사이트 첫 화면: 번호 4자리를 치면 바로 들어간다
+function renderLock() {
   return `
-    <div class="unlock" id="unlock">
-      <input id="pin-input" class="pin-input" type="password" inputmode="numeric" maxlength="${PIN_LENGTH}" autocomplete="off" aria-label="관리자 번호" />
+    <div class="lock-page">
+      <p class="lock-title">관리자</p>
+      <input id="pin-input" class="pin-input" type="password" inputmode="numeric" maxlength="${PIN_LENGTH}" autocomplete="off" placeholder="번호 4자리" aria-label="관리자 번호" />
     </div>`;
 }
 
@@ -569,10 +586,13 @@ function renderDateBox(date, { closable }) {
 function renderStaffItem(emp, date) {
   const today = todayDateString();
   const isToday = date === today;
-  const editable = date >= today;
+  const editable = ADMIN_SITE || date >= today;
   const rec = recordFor(emp.id, date);
   const done = Boolean(rec?.clockIn);
-  const { start, end } = shiftFor(emp, date);
+  // 관리자 화면에서는 기록이 있으면 기록된 시간을 보여준다
+  const shift = shiftFor(emp, date);
+  const start = ADMIN_SITE && rec ? formatTime(rec.clockIn) : shift.start;
+  const end = ADMIN_SITE && rec ? formatTime(rec.clockOut) : shift.end;
   const expanded = editable && state.expandedId === emp.id;
 
   let action = "";
@@ -582,7 +602,8 @@ function renderStaffItem(emp, date) {
     action = `
       <div class="action-row">
         <button type="button" class="btn-ghost" data-action="edit-shift" data-id="${emp.id}">수정</button>
-        ${isToday && !done ? `<button type="button" class="btn-primary" data-action="clock-in" data-id="${emp.id}">출근</button>` : ""}
+        ${!ADMIN_SITE && isToday && !done ? `<button type="button" class="btn-primary" data-action="clock-in" data-id="${emp.id}">출근</button>` : ""}
+        ${ADMIN_SITE && done ? `<button type="button" class="btn-ghost danger-ghost" data-action="remove-record" data-id="${emp.id}">기록 삭제</button>` : ""}
       </div>`;
   }
   if (expanded && state.error && state.editingWhere !== "staff") action += `<p class="error">${esc(state.error)}</p>`;
@@ -591,7 +612,7 @@ function renderStaffItem(emp, date) {
     <li class="staff-item${expanded ? " expanded" : ""}">
       <button type="button" class="staff-name-btn" data-action="toggle-staff" data-id="${emp.id}"${editable ? "" : " disabled"}>
         <span class="staff-name">${esc(emp.name)}</span>
-        ${done ? `<span class="badge done">출근 완료</span>` : ""}
+        ${done ? `<span class="badge done">출근 완료</span>` : ADMIN_SITE && date < today ? `<span class="badge none">기록 없음</span>` : ""}
         <span class="staff-time">${start} ~ ${end}</span>
       </button>
       ${action ? `<div class="staff-action">${action}</div>` : ""}
@@ -636,8 +657,15 @@ function renderAddExtra() {
 function renderStaff(date) {
   const today = todayDateString();
   const isToday = date === today;
-  const scheduled = scheduledOn(date);
-  const sub = isToday ? "본인 이름을 눌러 출근하세요" : date > today ? "이름을 눌러 시간을 수정할 수 있어요" : "지난 날짜예요";
+  let scheduled = scheduledOn(date);
+  let sub = isToday ? "본인 이름을 눌러 출근하세요" : date > today ? "이름을 눌러 시간을 수정할 수 있어요" : "지난 날짜예요";
+  if (ADMIN_SITE) {
+    // 근무 예정인 사람 + 근무표에 없지만 그날 기록이 있는 사람
+    const ids = new Set(scheduled.map((e) => e.id));
+    const extra = recordsOn(date).map((r) => employeeById(r.employeeId)).filter((e) => !ids.has(e.id));
+    scheduled = [...scheduled, ...extra];
+    sub = date < today ? "이름을 눌러 시간을 고치면 근무 기록·급여에 바로 반영돼요" : "이름을 눌러 근무 시간을 바꿀 수 있어요";
+  }
 
   return `
     <section class="staff" aria-label="근무자">
@@ -646,7 +674,7 @@ function renderStaff(date) {
       <ul class="staff-list">
         ${scheduled.map((e) => renderStaffItem(e, date)).join("") || `<li class="in-empty">근무 예정인 직원이 없어요</li>`}
       </ul>
-      ${date >= today ? renderAddExtra() : ""}
+      ${ADMIN_SITE || date >= today ? renderAddExtra() : ""}
     </section>`;
 }
 
@@ -654,34 +682,37 @@ function renderDayArea(date, { closable }) {
   return `<div class="day-area-inner">${renderDateBox(date, { closable })}${renderStaff(date)}</div>`;
 }
 
-function demoNote() {
-  return `<p class="demo-note">데이터는 이 기기의 브라우저에만 저장됩니다 · <button type="button" data-action="reset-data">처음 상태로 초기화</button></p>`;
-}
-
-function renderHome() {
+function renderCalendarCard() {
   const sel = state.selectedDate;
   const open = sel && !state.animateOpen;
   return `
+    <div class="card${open ? " open" : ""}" id="card">
+      <div class="cal-wrap">${renderCalendar()}</div>
+      <div class="day-area">${sel ? renderDayArea(sel, { closable: true }) : ""}</div>
+    </div>`;
+}
+
+function renderHome() {
+  return `
     <div class="home">
-      <div class="home-inner">
-        ${renderUnlock()}
-        <div class="card${open ? " open" : ""}" id="card">
-          <div class="cal-wrap">${renderCalendar()}</div>
-          <div class="day-area">${sel ? renderDayArea(sel, { closable: true }) : ""}</div>
-        </div>
-      </div>
-    </div>
-    ${demoNote()}`;
+      <div class="home-inner">${renderCalendarCard()}</div>
+    </div>`;
+}
+
+// 관리자 달력: 직원용 달력과 같은 화면. 출근 버튼은 없고 지난 날짜도 근무 시간을 고칠 수 있다.
+function renderAdminCalendar() {
+  return renderAdminShell("calendar", `<div class="admin-cal">${renderCalendarCard()}</div>`, { center: true, wide: true });
 }
 
 function renderDayPage(date) {
-  return `
+  const page = `
     <div class="day-page">
       <div class="day-page-inner">
         <button type="button" class="round-btn back-btn" data-action="go-home" aria-label="달력으로 돌아가기">${ICON_PREV}</button>
         ${renderDayArea(date, { closable: false })}
       </div>
     </div>`;
+  return ADMIN_SITE ? renderAdminShell("calendar", page) : page;
 }
 
 // ---------- 화면: 관리자 ----------
@@ -690,9 +721,10 @@ function renderAdminShell(active, content, { center = false, wide = false } = {}
   const link = (href, label, key) => `<a href="${href}" class="${active === key ? "active" : ""}">${label}</a>`;
   return `
     <nav class="admin-top" aria-label="관리자 메뉴">
-      ${link("#/admin/employees", "직원 관리", "employees")}
-      ${link("#/admin/schedule", "근무표", "schedule")}
-      ${link("#/admin/records", "근무 기록", "records")}
+      ${link("#/employees", "직원 관리", "employees")}
+      ${link("#/schedule", "근무표", "schedule")}
+      ${link("#/calendar", "달력", "calendar")}
+      ${link("#/records", "근무 기록", "records")}
       <button type="button" data-action="logout">로그아웃</button>
     </nav>
     <main class="admin-main${center ? " centered" : ""}${wide ? " wide" : ""}">${content}</main>`;
@@ -914,31 +946,6 @@ function timesheet(ym, employeeId, { includeAll = false } = {}) {
   return { days, rows };
 }
 
-// "7.5", "7:30", "7" → 시간(숫자). 비우면 0, 잘못된 값은 null
-function parseHours(text) {
-  const t = String(text).trim();
-  if (!t) return 0;
-  const hm = t.match(/^(\d{1,2}):(\d{1,2})$/);
-  const h = hm ? Number(hm[1]) + Number(hm[2]) / 60 : Number(t);
-  return Number.isFinite(h) && h >= 0 && h <= 24 ? Math.round(h * 100) / 100 : null;
-}
-
-// 관리자가 근무 상세 표에서 그날 근무시간을 직접 고친다.
-// 기록이 있으면 출근 시각은 두고 퇴근 시각만 맞추고, 없으면 그날 근무 시작 시간(없으면 09:00)으로 만든다.
-// 직접 고친 기록은 이후 근무표를 바꿔도 덮어쓰지 않는다(edited).
-function setDayHours(empId, date, hours) {
-  const rec = recordFor(empId, date);
-  if (!hours) {
-    if (rec) store.records = store.records.filter((r) => r !== rec);
-    return;
-  }
-  const emp = employeeById(empId);
-  const clockIn = rec?.clockIn ?? kstIso(date, shiftFor(emp, date).start ?? "09:00");
-  const clockOut = new Date(new Date(clockIn).getTime() + hours * 3_600_000).toISOString();
-  if (rec) Object.assign(rec, { clockOut, edited: true });
-  else store.records.push({ id: uid(), employeeId: empId, date, clockIn, clockOut, createdAt: new Date().toISOString(), edited: true });
-}
-
 function renderTimesheet(ym, employeeId) {
   const { days, rows } = timesheet(ym, employeeId, { includeAll: true });
   const today = todayDateString();
@@ -970,15 +977,11 @@ function renderTimesheet(ym, employeeId) {
                 .map((saved, j) => {
                   const d = days[j];
                   if (d > today) return `<td class="ts-day${wkClass(d)}"></td>`;
-                  const key = `${r.emp.id}|${d}`;
-                  const pending = hasOwn(state.tsDraft, key);
-                  const h = pending ? state.tsDraft[key] : saved;
-                  const cls = pending ? " pending" : r.edited[j] ? " edited" : "";
-                  const title = pending ? `저장 전 (원래 ${hour1(saved) || "없음"})` : r.edited[j] ? "직접 고친 시간" : "";
-                  return `<td class="ts-day${wkClass(d)}${cls}"><input class="ts-input" type="text" inputmode="decimal" value="${hour1(h)}" data-ts-key="${key}" aria-label="${esc(r.emp.name)} ${shortDate(d)} 근무시간" title="${title}" /></td>`;
+                  const cls = r.edited[j] ? " edited" : "";
+                  return `<td class="ts-day${wkClass(d)}${cls}"${r.edited[j] ? ` title="달력에서 직접 고친 시간"` : ""}>${hour1(saved)}</td>`;
                 })
                 .join("")}
-              <td class="ts-total">${r.cells.reduce((sum, saved, j) => sum + (state.tsDraft[`${r.emp.id}|${days[j]}`] ?? saved), 0).toFixed(1)}</td>
+              <td class="ts-total">${r.total.toFixed(1)}</td>
             </tr>`,
             )
             .join("")}
@@ -1076,7 +1079,6 @@ function renderRecords() {
   const [y, m] = month.split("-").map(Number);
   const { recs, rows, total } = payrollFor(month, employeeId);
   const taxOn = store.settings?.tax !== "none";
-  const tsPending = Object.keys(state.tsDraft).length;
 
   const summary = rows
     .map(
@@ -1123,9 +1125,8 @@ function renderRecords() {
     </div>
 
     <div class="section-head">
-      <h3>근무 상세${tsPending ? `<span class="pending-note">저장하지 않은 변경 ${tsPending}칸</span>` : ""}</h3>
+      <h3>근무 상세</h3>
       <div class="head-actions">
-        <button type="button" class="pill" data-action="save-timesheet"${tsPending ? "" : " disabled"}>저장</button>
         <button type="button" class="pill plain-dark" data-action="export-xlsx"${recs.length ? "" : " disabled"}>엑셀 다운로드</button>
       </div>
     </div>
@@ -1632,19 +1633,22 @@ async function schedulePdf(button) {
 
 function route() {
   const hash = location.hash.replace(/^#/, "") || "/";
+  if (ADMIN_SITE && !isAdmin()) return { name: "lock" };
   const day = hash.match(/^\/day\/(\d{4}-\d{2}-\d{2})$/);
   if (day) return { name: "day", date: day[1] };
-  if (hash.startsWith("/admin")) {
-    if (!isAdmin()) return { name: "home" };
-    const page = { "/admin/records": "records", "/admin/schedule": "schedule" }[hash];
-    return { name: page ?? "employees" };
-  }
-  return { name: "home" };
+  if (!ADMIN_SITE) return { name: "home" };
+  const page = { "/records": "records", "/schedule": "schedule", "/calendar": "calendar" }[hash];
+  return { name: page ?? "employees" };
 }
+
+// 달력 첫 화면 주소 (직원용은 #/, 관리자는 #/calendar)
+const homeHash = () => (ADMIN_SITE ? "#/calendar" : "#/");
 
 function render() {
   const r = route();
-  if (r.name === "day") app.innerHTML = renderDayPage(r.date);
+  if (r.name === "lock") app.innerHTML = renderLock();
+  else if (r.name === "day") app.innerHTML = renderDayPage(r.date);
+  else if (r.name === "calendar") app.innerHTML = renderAdminCalendar();
   else if (r.name === "employees") app.innerHTML = renderEmployees();
   else if (r.name === "records") app.innerHTML = renderRecords();
   else if (r.name === "schedule") app.innerHTML = renderSchedule();
@@ -1660,7 +1664,7 @@ function render() {
     }
   }
 
-  if (state.unlockOpen) document.getElementById("pin-input")?.focus();
+  if (r.name === "lock") document.getElementById("pin-input")?.focus();
 }
 
 function navigate(hash) {
@@ -1675,7 +1679,6 @@ window.addEventListener("hashchange", () => {
   state.allowDraft = null;
   state.slotEdit = null;
   state.helpOpen = {};
-  state.unlockOpen = false;
   render();
 });
 
@@ -1684,8 +1687,7 @@ window.addEventListener("hashchange", () => {
 function submitPin(value) {
   if (value === ADMIN_PIN) {
     setAdmin(true);
-    state.unlockOpen = false;
-    navigate("#/admin/employees");
+    navigate("#/employees");
     return;
   }
   render();
@@ -1731,10 +1733,6 @@ function closePanel() {
 }
 
 app.addEventListener("click", (e) => {
-  // PIN 입력칸 바깥을 누르면 닫기
-  const closedUnlock = state.unlockOpen && !e.target.closest("#unlock");
-  if (closedUnlock) state.unlockOpen = false;
-
   const cell = e.target.closest("[data-date]");
   if (cell) {
     selectDate(cell.dataset.date);
@@ -1744,16 +1742,10 @@ app.addEventListener("click", (e) => {
   const el = e.target.closest("[data-action]");
   // 명세서 창 안쪽 빈 곳을 누르면 바깥(닫기)으로 전달되지 않게
   const insideDialog = el?.classList.contains("ps-backdrop") && e.target.closest("[data-stop]") && !e.target.closest("[data-action]:not(.ps-backdrop)");
-  if (!el || insideDialog) {
-    if (closedUnlock) render();
-    return;
-  }
+  if (!el || insideDialog) return;
   const { action, id } = el.dataset;
 
   switch (action) {
-    case "open-unlock":
-      state.unlockOpen = true;
-      break;
     case "prev-month":
     case "next-month": {
       const m = state.month + (action === "prev-month" ? -1 : 1);
@@ -1765,7 +1757,7 @@ app.addEventListener("click", (e) => {
       closePanel();
       return;
     case "go-home":
-      navigate("#/");
+      navigate(homeHash());
       return;
     case "toggle-staff":
       state.error = "";
@@ -1791,6 +1783,16 @@ app.addEventListener("click", (e) => {
       }
       const date = activeDate();
       const emp = employeeById(id);
+      // 관리자: 지난 날짜는 근무 기록을 바로 고친다 (기록이 없으면 새로 넣는다)
+      if (ADMIN_SITE && date < todayDateString()) {
+        setRecordTimes(id, date, start, end);
+        save();
+        state.error = "";
+        state.editingId = null;
+        state.editingWhere = null;
+        state.expandedId = null;
+        break;
+      }
       setShift(id, date, start, end);
       // 이미 출근했다면 기록 시간도 함께 고친다
       const rec = recordFor(id, date);
@@ -1821,9 +1823,18 @@ app.addEventListener("click", (e) => {
         return;
       }
       break;
+    case "remove-record": {
+      const date = activeDate();
+      if (!window.confirm(`${employeeById(id).name}님의 ${shortDate(date)} 근무 기록을 삭제할까요?`)) return;
+      removeRecord(id, date);
+      save();
+      state.expandedId = null;
+      break;
+    }
     case "logout":
       setAdmin(false);
       navigate("#/");
+      render();
       return;
     case "toggle-active": {
       const emp = employeeById(id);
@@ -1842,14 +1853,6 @@ app.addEventListener("click", (e) => {
     case "export-xlsx":
       exportXlsx(el);
       return;
-    case "save-timesheet":
-      for (const [key, hours] of Object.entries(state.tsDraft)) {
-        const [empId, date] = key.split("|");
-        setDayHours(empId, date, hours);
-      }
-      state.tsDraft = {};
-      save();
-      break;
     case "payroll-prev":
     case "payroll-next":
       state.payroll.month = shiftMonth(state.payroll.month, action === "payroll-prev" ? -1 : 1);
@@ -1930,13 +1933,6 @@ app.addEventListener("click", (e) => {
     case "payslip-pdf-all":
       payslipPdf(el, payrollFor(state.payroll.month, state.payroll.employeeId).rows.map((r) => r.emp.id));
       return;
-    case "reset-data":
-      if (!window.confirm("출근 기록과 수정한 내용을 모두 지우고 처음 근무표로 되돌릴까요?")) return;
-      store = initialData();
-      save();
-      state.selectedDate = null;
-      state.expandedId = null;
-      break;
     default:
       return;
   }
@@ -1944,22 +1940,7 @@ app.addEventListener("click", (e) => {
 });
 
 app.addEventListener("keydown", (e) => {
-  // 근무 상세 칸: Enter 로 저장하고 아래 칸으로
-  if (e.target.dataset?.tsKey && e.key === "Enter") {
-    e.preventDefault();
-    const [empId, date] = e.target.dataset.tsKey.split("|");
-    const inputs = [...document.querySelectorAll(`[data-ts-key$="|${date}"]`)];
-    const below = inputs[inputs.indexOf(e.target) + 1];
-    (below ?? e.target).focus();
-    if (!below) e.target.blur();
-    return;
-  }
-  if (e.target.id !== "pin-input") return;
-  if (e.key === "Enter") submitPin(e.target.value);
-  else if (e.key === "Escape") {
-    state.unlockOpen = false;
-    render();
-  }
+  if (e.target.id === "pin-input" && e.key === "Enter") submitPin(e.target.value);
 });
 
 app.addEventListener("submit", (e) => {
@@ -2035,38 +2016,6 @@ app.addEventListener("change", (e) => {
     render();
     return;
   }
-  if (t.dataset.tsKey) {
-    const hours = parseHours(t.value);
-    if (hours === null) {
-      // 잘못 입력하면 빨간 테두리 후 원래 숫자로 되돌린다
-      t.classList.add("invalid");
-      setTimeout(() => {
-        t.classList.remove("invalid");
-        t.value = t.defaultValue;
-      }, 1200);
-      return;
-    }
-    // 저장 전까지는 초안에만 둔다 (원래 값으로 돌려놓으면 초안에서 뺀다)
-    const [empId, date] = t.dataset.tsKey.split("|");
-    const rec = recordFor(empId, date);
-    const saved = rec ? Math.round(hoursBetween(rec.clockIn, rec.clockOut) * 100) / 100 : 0;
-    if (hours === saved) delete state.tsDraft[t.dataset.tsKey];
-    else state.tsDraft[t.dataset.tsKey] = hours;
-    // Tab 으로 다음 칸에 가 있는 포커스를 다시 그린 뒤에도 유지
-    setTimeout(() => {
-      const key = document.activeElement?.dataset?.tsKey;
-      const scrollX = document.querySelector(".ts-wrap")?.scrollLeft ?? 0;
-      render();
-      const wrap = document.querySelector(".ts-wrap");
-      if (wrap) wrap.scrollLeft = scrollX;
-      if (key) {
-        const el = document.querySelector(`[data-ts-key="${key}"]`);
-        el?.focus();
-        caretToEnd(el);
-      }
-    });
-    return;
-  }
   if (t.dataset.payroll) {
     state.payroll[t.dataset.payroll] = t.value;
     render();
@@ -2095,10 +2044,12 @@ function addExtra() {
     store.employees.push(emp);
     ensureColors();
   }
-  setShift(emp.id, activeDate(), start, end);
+  const date = activeDate();
+  if (ADMIN_SITE && date < todayDateString()) setRecordTimes(emp.id, date, start, end);
+  else setShift(emp.id, date, start, end);
   save();
   state.adding = false;
-  state.expandedId = emp.id; // 바로 출근할 수 있게 펼쳐 둔다
+  state.expandedId = ADMIN_SITE ? null : emp.id; // 직원 화면: 바로 출근할 수 있게 펼쳐 둔다
   render();
 }
 
@@ -2142,8 +2093,8 @@ window.matchMedia("(min-width: 768px)").addEventListener("change", (mq) => {
   const r = route();
   if (mq.matches && r.name === "day") {
     state.selectedDate = r.date;
-    navigate("#/");
-  } else if (!mq.matches && r.name === "home" && state.selectedDate) {
+    navigate(homeHash());
+  } else if (!mq.matches && (r.name === "home" || r.name === "calendar") && state.selectedDate) {
     const date = state.selectedDate;
     state.selectedDate = null;
     navigate(`#/day/${date}`);
@@ -2158,17 +2109,4 @@ app.addEventListener("input", (e) => {
 });
 app.addEventListener("change", (e) => {
   if (e.target.id === "slot-emp") liveSlot();
-});
-
-// 근무 상세 칸: 어디를 눌러도 커서는 맨 뒤 (뒤에서부터 지우고 다시 입력)
-function caretToEnd(el) {
-  if (!el) return;
-  const n = el.value.length;
-  el.setSelectionRange(n, n);
-}
-app.addEventListener("focusin", (e) => {
-  if (e.target.classList?.contains("ts-input")) setTimeout(() => caretToEnd(e.target));
-});
-app.addEventListener("mouseup", (e) => {
-  if (e.target.classList?.contains("ts-input")) caretToEnd(e.target);
 });
