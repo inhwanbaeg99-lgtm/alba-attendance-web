@@ -788,6 +788,7 @@ ul {
 
 /* ---------- 관리자 ---------- */
 .admin-top {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
@@ -1738,4 +1739,30 @@ td.name {
 .badge.none {
   background: var(--paper);
   color: var(--ink-sub);
+}
+
+/* 관리자 메뉴: 네 개는 가운데, 로그아웃은 오른쪽 위 끝 */
+.admin-top .logout {
+  position: absolute;
+  top: calc(40px + env(safe-area-inset-top, 0px));
+  right: 24px;
+}
+
+@media (max-width: 767px) {
+  .admin-top {
+    padding-top: calc(64px + env(safe-area-inset-top, 0px));
+  }
+  .admin-top {
+    gap: 4px;
+  }
+  .admin-top a {
+    padding: 10px 14px;
+    font-size: 15px;
+  }
+  .admin-top .logout {
+    top: calc(12px + env(safe-area-inset-top, 0px));
+    right: 8px;
+    padding: 8px 14px;
+    font-size: 14px;
+  }
 }

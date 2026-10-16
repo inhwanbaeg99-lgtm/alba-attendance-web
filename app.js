@@ -731,7 +731,7 @@ function renderAdminShell(active, content, { center = false, wide = false } = {}
       ${link("#/schedule", "근무표", "schedule")}
       ${link("#/calendar", "달력", "calendar")}
       ${link("#/records", "근무 기록", "records")}
-      <button type="button" data-action="logout">로그아웃</button>
+      <button type="button" class="logout" data-action="logout">로그아웃</button>
     </nav>
     <main class="admin-main${center ? " centered" : ""}${wide ? " wide" : ""}">${content}</main>`;
 }
