@@ -727,10 +727,10 @@ function renderAdminShell(active, content, { center = false, wide = false } = {}
   const link = (href, label, key) => `<a href="${href}" class="${active === key ? "active" : ""}">${label}</a>`;
   return `
     <nav class="admin-top" aria-label="관리자 메뉴">
-      ${link("#/employees", "직원 관리", "employees")}
+      ${link("#/employees", "직원", "employees")}
       ${link("#/schedule", "근무표", "schedule")}
       ${link("#/calendar", "달력", "calendar")}
-      ${link("#/records", "근무 기록", "records")}
+      ${link("#/records", "급여", "records")}
       <button type="button" class="logout" data-action="logout">로그아웃</button>
     </nav>
     <main class="admin-main${center ? " centered" : ""}${wide ? " wide" : ""}">${content}</main>`;
