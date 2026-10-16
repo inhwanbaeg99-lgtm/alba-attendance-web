@@ -237,6 +237,19 @@ function shiftFor(emp, date) {
   return store.shifts[date]?.[emp.id] ?? weeklyOn(emp, date)[weekdayOf(date)] ?? { start: "09:00", end: "18:00" };
 }
 
+// 그날 일정상 근무 시간(시간 단위). 근무 요일이 아니고 그날만 추가된 것도 아니면 0.
+function plannedOn(emp, date) {
+  if (!store.shifts[date]?.[emp.id] && !weeklyOn(emp, date)[weekdayOf(date)]) return 0;
+  const { start, end } = shiftFor(emp, date);
+  return hoursBetween(kstIso(date, start), endIso(date, start, end));
+}
+
+// 실제 근무 시간을 일정과 비교: 많으면 " over"(파랑), 적으면 " under"(빨강), 같으면 ""(검정)
+function diffClass(emp, date, worked) {
+  const diff = worked - plannedOn(emp, date);
+  return diff > 0.01 ? " over" : diff < -0.01 ? " under" : "";
+}
+
 function setShift(empId, date, start, end) {
   store.shifts[date] = { ...store.shifts[date], [empId]: { start, end } };
 }
@@ -523,10 +536,11 @@ function renderCalendar() {
       const isRest = i % 7 === 0 || Boolean(holiday);
       const numClass = date === today ? "today" : isRest ? "rest" : "";
       const chips = [
-        ...entries.slice(0, MAX_VISIBLE).map(
-          (r) =>
-            `<span class="chip">${esc(employeeById(r.employeeId).name)} <span class="chip-time">${formatTime(r.clockIn)}~${formatTime(r.clockOut)}</span></span>`,
-        ),
+        ...entries.slice(0, MAX_VISIBLE).map((r) => {
+          const emp = employeeById(r.employeeId);
+          const diff = diffClass(emp, date, hoursBetween(r.clockIn, r.clockOut));
+          return `<span class="chip${diff}">${esc(emp.name)} <span class="chip-time">${formatTime(r.clockIn)}~${formatTime(r.clockOut)}</span></span>`;
+        }),
         entries.length > MAX_VISIBLE ? `<span class="chip more">+${entries.length - MAX_VISIBLE}명</span>` : "",
       ].join("");
       return `
@@ -567,7 +581,7 @@ function renderDateBox(date, { closable }) {
         <li class="in-item${r.id === state.justAddedId ? " new" : ""}">
           <div class="in-row">
             <span class="in-name">${esc(employeeById(r.employeeId).name)}</span>
-            <span class="in-time">${formatTime(r.clockIn)} ~ ${formatTime(r.clockOut)}</span>
+            <span class="in-time${diffClass(employeeById(r.employeeId), date, hoursBetween(r.clockIn, r.clockOut))}">${formatTime(r.clockIn)} ~ ${formatTime(r.clockOut)}</span>
           </div>
         </li>`,
     )
@@ -619,7 +633,7 @@ function renderStaffItem(emp, date) {
       <button type="button" class="staff-name-btn" data-action="toggle-staff" data-id="${emp.id}"${editable ? "" : " disabled"}>
         <span class="staff-name">${esc(emp.name)}</span>
         ${done ? `<span class="badge done">출근 완료</span>` : ADMIN_SITE && date < today ? `<span class="badge none">기록 없음</span>` : ""}
-        <span class="staff-time">${start} ~ ${end}</span>
+        <span class="staff-time${ADMIN_SITE && rec ? diffClass(emp, date, hoursBetween(rec.clockIn, rec.clockOut)) : ""}">${start} ~ ${end}</span>
       </button>
       ${action ? `<div class="staff-action">${action}</div>` : ""}
     </li>`;
@@ -983,7 +997,9 @@ function renderTimesheet(ym, employeeId) {
                 .map((saved, j) => {
                   const d = days[j];
                   if (d > today) return `<td class="ts-day${wkClass(d)}"></td>`;
-                  const cls = r.edited[j] ? " edited" : "";
+                  // 오늘인데 아직 기록이 없으면 결근으로 보지 않는다
+                  const diff = d === today && !saved ? "" : diffClass(r.emp, d, saved);
+                  const cls = (r.edited[j] ? " edited" : "") + diff;
                   return `<td class="ts-day${wkClass(d)}${cls}"${r.edited[j] ? ` title="달력에서 직접 고친 시간"` : ""}>${hour1(saved)}</td>`;
                 })
                 .join("")}

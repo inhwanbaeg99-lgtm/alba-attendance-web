@@ -1662,8 +1662,27 @@ td.name {
 }
 
 .timesheet td.edited {
-  color: var(--accent);
   font-weight: 700;
+}
+
+/* 일정보다 많이 일하면 파랑, 적게 일하면 빨강 (같으면 기본 검정) */
+.timesheet td.over,
+.chip.over,
+.in-time.over,
+.staff-time.over {
+  color: var(--accent);
+}
+
+.timesheet td.under,
+.chip.under,
+.in-time.under,
+.staff-time.under {
+  color: var(--red);
+}
+
+.chip.over .chip-time,
+.chip.under .chip-time {
+  color: inherit;
 }
 
 .head-actions {
