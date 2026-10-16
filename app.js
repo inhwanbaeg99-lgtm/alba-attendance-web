@@ -357,8 +357,7 @@ function pinPeriodYear() {
   if (period && !/\d{4}/.test(period) && /\d/.test(period)) store.scheduleMeta.period = `${scheduleStart().slice(0, 4)}. ${period.trim()}`;
 }
 
-function scheduleStart() {
-  const period = store.scheduleMeta?.period ?? "";
+function scheduleStart(period = store.scheduleMeta?.period ?? "") {
   const pad = (n) => n.padStart(2, "0");
   // 연도가 있으면 그대로 (2026. 10. 5 / 2026-10-05 / 2026년 10월 5일)
   const full = period.match(/(\d{4})\s*[.\-/년]\s*(\d{1,2})\s*[.\-/월]\s*(\d{1,2})/);
@@ -1473,7 +1472,7 @@ function renderScheduleSheet() {
   return `
     <div class="sched-sheet" id="sched-sheet">
       <div class="sc-head">
-        <h2 class="sc-title">[${STORE_NAME} 근무표](<input class="sc-period" value="${esc(meta.period ?? "")}" size="${Math.max(6, [...(meta.period ?? "")].length)}" data-meta="period" placeholder="2026. 10. 5 ~ 11. 8" aria-label="기간" />)</h2>
+        <h2 class="sc-title">[${STORE_NAME} 근무표]( <input class="sc-period" value="${esc(meta.period ?? "")}" size="${Math.max(6, [...(meta.period || "2026.06.04 ~ 2026.07.05")].length)}" data-meta="period" inputmode="numeric" placeholder="2026.06.04 ~ 2026.07.05" aria-label="기간" /> )</h2>
         <div class="sc-actions" data-html2canvas-ignore>
           <button type="button" class="pill plain-dark" data-action="schedule-temp"${schedDirty() ? "" : " disabled"}>임시저장</button>
           <button type="button" class="pill" data-action="schedule-save"${hasDraft() ? "" : " disabled"}>저장</button>
@@ -1675,6 +1674,9 @@ function render() {
   else if (r.name === "records") app.innerHTML = renderRecords();
   else if (r.name === "schedule") app.innerHTML = renderSchedule();
   else app.innerHTML = renderHome();
+
+  const period = document.querySelector(".sc-period");
+  if (period) fitPeriod(period);
 
   // 처음 날짜를 눌렀을 때 달력이 줄어드는 애니메이션
   if (state.animateOpen) {
@@ -1918,7 +1920,11 @@ app.addEventListener("click", (e) => {
       break;
     case "schedule-save":
       if (state.slotEdit) liveSlot({ final: true });
-      if (!window.confirm("근무표를 저장하면 직원 관리·달력·근무 기록에 반영돼요. 저장할까요?")) return;
+      {
+        // 저장할 근무표(아직 저장 전인 기간 포함)의 시작일
+        const from = scheduleStart(state.schedWork?.meta?.period ?? store.scheduleMeta?.period ?? "").replaceAll("-", ".");
+        if (!window.confirm(`근무표를 저장하면 ${from} 부터 직원 관리·달력·근무 기록에 반영돼요. 저장할까요?`)) return;
+      }
       state.slotEdit = null;
       commitSchedule();
       break;
@@ -1981,8 +1987,11 @@ app.addEventListener("click", (e) => {
   render();
 });
 
+// 달력에서 근무 시간을 고칠 때 엔터 = 저장
 app.addEventListener("keydown", (e) => {
-
+  if (e.key !== "Enter" || e.isComposing || !["edit-start", "edit-end"].includes(e.target.id)) return;
+  e.preventDefault();
+  e.target.closest(".staff-action, .date-box, .day-area-inner")?.querySelector('[data-action="save-shift"]')?.click();
 });
 
 app.addEventListener("submit", (e) => {
@@ -2145,9 +2154,54 @@ window.matchMedia("(min-width: 768px)").addEventListener("change", (mq) => {
 
 render();
 
+// 근무표 기간: 숫자만 입력해도 "2026.06.04 ~ 2026.07.05" 꼴로 맞춘다
+function formatPeriod(digits) {
+  const d = digits.slice(0, 16);
+  const date = (s) => [s.slice(0, 4), s.slice(4, 6), s.slice(6, 8)].filter(Boolean).join(".");
+  if (d.length < 8) return date(d);
+  return d.length === 8 ? `${date(d)} ~ ` : `${date(d.slice(0, 8))} ~ ${date(d.slice(8))}`;
+}
+
+// 예전 형식("2026. 10. 5 ~ 11. 8")은 고치기 시작할 때 새 형식("2026.10.05 ~ 2026.11.08")으로 바꿔 둔다
+function normalizePeriod(text) {
+  const [a, b] = text.split("~");
+  if (!/\d/.test(a ?? "") || /^\d{4}\.\d{2}\.\d{2}( ~ (\d{4}\.\d{2}\.\d{2})?)?$/.test(text)) return text;
+  const start = scheduleStart(a);
+  const m = b?.match(/(?:(\d{4})\s*[.\-/년]\s*)?(\d{1,2})\s*[.\-/월]\s*(\d{1,2})/);
+  if (!m) return `${start.replaceAll("-", ".")} ~ `;
+  const md = `${m[2].padStart(2, "0")}.${m[3].padStart(2, "0")}`;
+  // 끝 날짜에 연도가 없으면 시작일과 같은 해, 시작보다 앞이면 다음 해
+  const year = m[1] ?? String(Number(start.slice(0, 4)) + (md < start.slice(5).replace("-", ".") ? 1 : 0));
+  return `${start.replaceAll("-", ".")} ~ ${year}.${md}`;
+}
+
+function livePeriod(input, e) {
+  let digits = input.value.replace(/\D/g, "");
+  // 점이나 " ~ " 를 지웠을 때는 그 앞 숫자를 지운다 (안 그러면 다시 붙어서 안 지워짐)
+  if (e.inputType?.startsWith("delete") && digits === (input.dataset.digits ?? "")) digits = digits.slice(0, -1);
+  input.dataset.digits = digits;
+  input.value = formatPeriod(digits);
+  fitPeriod(input);
+}
+
+// 기간 입력칸 너비를 글자에 딱 맞춘다 (괄호와의 간격이 양쪽 같게)
+var measureCtx; // var: 이 줄보다 먼저 실행되는 첫 render() 에서도 쓸 수 있게
+function fitPeriod(input) {
+  measureCtx ??= document.createElement("canvas").getContext("2d");
+  measureCtx.font = getComputedStyle(input).font;
+  input.style.width = `${Math.ceil(measureCtx.measureText(input.value || input.placeholder).width) + 2}px`;
+}
+
 // 근무표 편집 패널: 입력하는 대로 왼쪽 표에 반영
 app.addEventListener("input", (e) => {
   if (e.target.id === "slot-start" || e.target.id === "slot-end") liveSlot();
+  if (e.target.classList.contains("sc-period")) livePeriod(e.target, e);
+});
+app.addEventListener("focusin", (e) => {
+  if (!e.target.classList.contains("sc-period")) return;
+  e.target.value = normalizePeriod(e.target.value);
+  e.target.dataset.digits = e.target.value.replace(/\D/g, "");
+  fitPeriod(e.target);
 });
 app.addEventListener("change", (e) => {
   if (e.target.id === "slot-emp") liveSlot();
