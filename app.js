@@ -1532,6 +1532,7 @@ function renderRecords() {
 
 const LIBS = {
   xlsx: { src: "https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js", ready: () => window.XLSX },
+  fflate: { src: "https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js", ready: () => window.fflate },
   html2canvas: { src: "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js", ready: () => window.html2canvas },
   jspdf: { src: "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js", ready: () => window.jspdf?.jsPDF },
 };
@@ -1693,79 +1694,162 @@ async function getTemplateHandle() {
   return pickTemplateHandle();
 }
 
-// 날짜 숫자가 가장 많이 나온 행을 "날짜 행"으로 본다 (근로현황 시트는 사람이 만든 표라 행 위치가 고정돼 있지 않음)
-function findDateRow(XLSX, ws, range) {
-  let best = -1, bestCount = 0;
-  for (let R = range.s.r; R <= Math.min(range.s.r + 10, range.e.r); R++) {
-    let count = 0;
-    for (let C = range.s.c; C <= range.e.c; C++) {
-      const cell = ws[XLSX.utils.encode_cell({ r: R, c: C })];
-      if (cell && cell.t === "n" && cell.v > 30000 && cell.v < 60000) count++;
-    }
-    if (count > bestCount) { bestCount = count; best = R; }
+// 엑셀 파일(zip) 안에서 날짜 칸의 <v>만 바꿔치기한다 (SheetJS로 전체를 다시 조립하면 서식이 깨지거나
+// 용량이 크게 불어나는 경우가 있어서, 건드릴 칸만 문자열로 직접 패치하고 나머지는 원본 그대로 둔다).
+
+const escRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+function colToIndex(letters) {
+  let n = 0;
+  for (let i = 0; i < letters.length; i++) n = n * 26 + (letters.charCodeAt(i) - 64);
+  return n;
+}
+function indexToCol(n) {
+  let s = "";
+  while (n > 0) {
+    s = String.fromCharCode(65 + ((n - 1) % 26)) + s;
+    n = Math.floor((n - 1) / 26);
   }
-  return best;
+  return s;
+}
+function splitCellRef(ref) {
+  const m = ref.match(/^([A-Z]+)(\d+)$/);
+  return { col: colToIndex(m[1]), row: Number(m[2]) };
+}
+function excelSerialToIso(serial) {
+  const d = new Date(Date.UTC(1899, 11, 30) + Math.round(serial) * 86400000);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+}
+
+function decodeXmlText(s) {
+  return s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
+}
+function parseSharedStrings(xml) {
+  const out = [];
+  for (const si of xml.matchAll(/<si>([\s\S]*?)<\/si>/g)) {
+    let text = "";
+    for (const t of si[1].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)) text += t[1];
+    out.push(decodeXmlText(text));
+  }
+  return out;
+}
+
+// <row>들을 {r, startIndex, endIndex, inner} 목록으로 쪼갠다
+function parseRows(xml) {
+  const rows = [];
+  for (const m of xml.matchAll(/<row r="(\d+)"[^>]*>([\s\S]*?)<\/row>/g)) {
+    rows.push({ r: Number(m[1]), inner: m[2], start: m.index, end: m.index + m[0].length, innerStart: m.index + m[0].indexOf(">") + 1 });
+  }
+  return rows;
+}
+// 행 안의 <c>들을 {ref, col, type, raw} 목록으로 쪼갠다
+function parseCells(rowInner) {
+  const cells = [];
+  for (const m of rowInner.matchAll(/<c r="([A-Z]+)(\d+)"([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+    const tMatch = m[3].match(/\st="(\w+)"/);
+    const vMatch = (m[4] || "").match(/<v>([\s\S]*?)<\/v>/);
+    cells.push({ ref: m[1] + m[2], col: colToIndex(m[1]), type: tMatch ? tMatch[1] : null, raw: vMatch ? vMatch[1] : null, start: m.index, end: m.index + m[0].length, attrs: m[3] });
+  }
+  return cells;
+}
+
+// row.inner 안에서 ref 칸을 새 값(숫자)으로 바꾸거나(value!=null) 비운다(value==null). 칸이 없으면 알맞은 위치에 새로 끼워 넣는다.
+function patchCell(rowInner, cells, ref, col, value) {
+  const existing = cells.find((c) => c.ref === ref);
+  const newXml = value == null ? `<c r="${ref}"${existing ? existing.attrs.replace(/\st="\w+"/, "") : ""}/>` : `<c r="${ref}"${existing ? existing.attrs.replace(/\st="\w+"/, "") : ""}><v>${value}</v></c>`;
+  if (existing) return rowInner.slice(0, existing.start) + newXml + rowInner.slice(existing.end);
+  if (value == null) return rowInner; // 원래 없던 칸이면 비울 것도 없음
+  const next = cells.find((c) => c.col > col);
+  const at = next ? next.start : rowInner.length;
+  return rowInner.slice(0, at) + newXml + rowInner.slice(at);
 }
 
 function syncXlsx(button) {
   return withBusy(button, "입력하는 중…", async () => {
-    const XLSX = await loadLib("xlsx");
+    const fflate = await loadLib("fflate");
     const { month, employeeId } = state.payroll;
     const ts = timesheet(month, employeeId);
     if (!ts.rows.length) throw new Error("이 달에는 입력할 근무 기록이 없어요.");
 
     const handle = await getTemplateHandle();
     const file = await handle.getFile();
-    const wb = XLSX.read(await file.arrayBuffer(), { type: "array", cellStyles: true });
+    const zip = fflate.unzipSync(new Uint8Array(await file.arrayBuffer()));
+    const dec = (name) => fflate.strFromU8(zip[name]);
+
+    // 바깥에서 셀 값만 고쳐 넣으면 엑셀이 캐시된 수식 결과를 그대로 보여줄 수 있어서,
+    // 다음에 열 때 전체를 다시 계산하도록 표시해둔다.
+    let workbookXml = dec("xl/workbook.xml");
+    workbookXml = /<calcPr\b[^>]*fullCalcOnLoad=/.test(workbookXml)
+      ? workbookXml
+      : /<calcPr\b[^>]*\/>/.test(workbookXml)
+        ? workbookXml.replace(/<calcPr\b([^>]*)\/>/, '<calcPr$1 fullCalcOnLoad="1"/>')
+        : workbookXml.replace("</workbook>", '<calcPr fullCalcOnLoad="1"/></workbook>');
+    zip["xl/workbook.xml"] = fflate.strToU8(workbookXml);
 
     const sheetName = `${Number(month.slice(5, 7))}월 근로현황`;
-    const ws = wb.Sheets[sheetName];
-    if (!ws) throw new Error(`선택한 파일에서 "${sheetName}" 시트를 찾지 못했어요. 이 달 파일이 맞는지 확인해주세요.`);
+    const sheetTag = workbookXml.match(new RegExp(`<sheet name="${escRe(sheetName)}"[^>]*r:id="(rId\\d+)"`));
+    if (!sheetTag) throw new Error(`선택한 파일에서 "${sheetName}" 시트를 찾지 못했어요. 이 달 파일이 맞는지 확인해주세요.`);
+    const relTag = dec("xl/_rels/workbook.xml.rels").match(new RegExp(`<Relationship Id="${sheetTag[1]}"[^>]*Target="([^"]+)"`));
+    const sheetPath = "xl/" + relTag[1];
+    const sheetXml = dec(sheetPath);
+    const strings = zip["xl/sharedStrings.xml"] ? parseSharedStrings(dec("xl/sharedStrings.xml")) : [];
 
-    const range = XLSX.utils.decode_range(ws["!ref"]);
-    const dateRow = findDateRow(XLSX, ws, range);
-    if (dateRow < 0) throw new Error("시트에서 날짜가 적힌 행을 찾지 못했어요.");
+    const rows = parseRows(sheetXml);
+    const rowsWithCells = rows.map((row) => ({ ...row, cells: parseCells(row.inner) }));
+
+    // 날짜(엑셀 serial) 숫자 칸이 가장 많은 행을 "날짜 행"으로 본다
+    let dateRow = null, bestCount = 0;
+    for (const row of rowsWithCells.slice(0, 10)) {
+      const count = row.cells.filter((c) => !c.type && c.raw && Number(c.raw) > 30000 && Number(c.raw) < 60000).length;
+      if (count > bestCount) { bestCount = count; dateRow = row; }
+    }
+    if (!dateRow) throw new Error("시트에서 날짜가 적힌 행을 찾지 못했어요.");
 
     const colToDate = {};
-    for (let C = range.s.c; C <= range.e.c; C++) {
-      const cell = ws[XLSX.utils.encode_cell({ r: dateRow, c: C })];
-      if (!cell || cell.t !== "n") continue;
-      const d = XLSX.SSF.parse_date_code(cell.v);
-      if (d) colToDate[C] = `${d.y}-${String(d.m).padStart(2, "0")}-${String(d.d).padStart(2, "0")}`;
+    for (const c of dateRow.cells) {
+      if (c.type || !c.raw) continue;
+      const serial = Number(c.raw);
+      if (serial > 30000 && serial < 60000) colToDate[c.col] = excelSerialToIso(serial);
     }
     const firstDateCol = Math.min(...Object.keys(colToDate).map(Number));
+    const colForDate = Object.fromEntries(Object.entries(colToDate).map(([c, d]) => [d, Number(c)]));
 
-    // 이름 열: 날짜 열보다 왼쪽에서 글자 칸이 가장 많은 열
-    let nameCol = -1, bestStrCount = 0;
-    for (let C = range.s.c; C < firstDateCol; C++) {
-      let count = 0;
-      for (let R = dateRow + 1; R <= range.e.r; R++) {
-        const cell = ws[XLSX.utils.encode_cell({ r: R, c: C })];
-        if (cell && cell.t === "s") count++;
-      }
-      if (count > bestStrCount) { bestStrCount = count; nameCol = C; }
-    }
-    if (nameCol < 0) throw new Error("시트에서 이름이 적힌 열을 찾지 못했어요.");
+    // 이름 열: 날짜 열보다 왼쪽에서 글자(공유 문자열) 칸이 가장 많은 열
+    const dataRows = rowsWithCells.filter((r) => r.r > dateRow.r);
+    const strCountByCol = {};
+    for (const row of dataRows) for (const c of row.cells) if (c.col < firstDateCol && c.type === "s") strCountByCol[c.col] = (strCountByCol[c.col] || 0) + 1;
+    const nameCol = Number(Object.entries(strCountByCol).sort((a, b) => b[1] - a[1])[0]?.[0]);
+    if (!Number.isFinite(nameCol)) throw new Error("시트에서 이름이 적힌 열을 찾지 못했어요.");
 
+    let patched = sheetXml;
     const notFound = [];
-    for (const row of ts.rows) {
-      let targetRow = -1;
-      for (let R = dateRow + 1; R <= range.e.r; R++) {
-        const cell = ws[XLSX.utils.encode_cell({ r: R, c: nameCol })];
-        if (cell && cell.v === row.emp.name) { targetRow = R; break; }
-      }
-      if (targetRow < 0) { notFound.push(row.emp.name); continue; }
+    // 뒤에서부터 바꿔야 앞쪽 바뀐 내용이 뒤쪽 인덱스를 틀어지게 만들지 않는다
+    for (const row of [...dataRows].sort((a, b) => b.r - a.r)) {
+      const nameCell = row.cells.find((c) => c.col === nameCol && c.type === "s");
+      const name = nameCell ? strings[Number(nameCell.raw)] : null;
+      const empRow = ts.rows.find((r) => r.emp.name === name);
+      if (!name || !empRow) continue;
+      let inner = row.inner;
+      let cells = row.cells;
       ts.days.forEach((date, i) => {
-        const col = Number(Object.keys(colToDate).find((c) => colToDate[c] === date));
-        if (Number.isNaN(col)) return;
-        const ref = XLSX.utils.encode_cell({ r: targetRow, c: col });
-        const hours = Math.round(row.cells[i] * 100) / 100;
-        if (hours > 0) ws[ref] = { ...ws[ref], t: "n", v: hours };
-        else delete ws[ref];
+        const col = colForDate[date];
+        if (col === undefined) return;
+        const ref = indexToCol(col) + row.r;
+        const hours = Math.round(empRow.cells[i] * 100) / 100;
+        inner = patchCell(inner, cells, ref, col, hours > 0 ? hours : null);
+        cells = parseCells(inner); // 다음 칸을 위해 인덱스 다시 계산
       });
+      patched = patched.slice(0, row.innerStart) + inner + patched.slice(row.innerStart + row.inner.length);
+    }
+    for (const empRow of ts.rows) {
+      if (!dataRows.some((row) => row.cells.some((c) => c.col === nameCol && c.type === "s" && strings[Number(c.raw)] === empRow.emp.name))) {
+        notFound.push(empRow.emp.name);
+      }
     }
 
-    const out = XLSX.write(wb, { type: "array", bookType: "xlsx", cellStyles: true });
+    zip[sheetPath] = fflate.strToU8(patched);
+    const out = fflate.zipSync(zip, { level: 6 });
+
     const writable = await handle.createWritable();
     await writable.write(out);
     await writable.close();
