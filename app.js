@@ -2080,11 +2080,12 @@ function adaptWorkbookMonth(fflate, zip, month) {
     zip["xl/workbook.xml"] = fflate.strToU8(wbXml);
     for (const name of Object.keys(zip)) if (/^xl\/worksheets\/sheet\d+\.xml$/.test(name)) zip[name] = fflate.strToU8(swap(dec(name)));
     if (zip["docProps/app.xml"]) zip["docProps/app.xml"] = fflate.strToU8(dec("docProps/app.xml").split(`>${oldName}<`).join(`>${newName}<`));
+    // "9월", "[9월 급여명세서(정미진)]" 같은 글자 속 달 표시 (앞이 숫자인 "19월" 같은 건 제외)
+    const monthToken = new RegExp(`(^|[^0-9])${oldM}월`, "g");
     sst.xml = sst.xml.replace(/<si>([\s\S]*?)<\/si>/g, (all, inner) => {
-      const text = [...inner.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((x) => x[1]).join("");
-      if (text === `${oldM}월`) return `<si><t>${newM}월</t></si>`;
-      if (text === oldName) return `<si><t>${xmlEsc(newName)}</t></si>`;
-      return all;
+      const text = decodeXmlText([...inner.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((x) => x[1]).join(""));
+      if (!new RegExp(monthToken.source).test(text)) return all;
+      return `<si><t xml:space="preserve">${xmlEsc(text.replace(monthToken, `$1${newM}월`))}</t></si>`;
     });
     sst.strings = parseSharedStrings(sst.xml);
   }
@@ -2144,12 +2145,155 @@ function adaptWorkbookMonth(fflate, zip, month) {
   zip["xl/sharedStrings.xml"] = fflate.strToU8(sst.xml);
 }
 
+// 근무시간표 달력의 마지막 주(L줄)를 하나 더 복제해 붙인다. 원래 마지막 주는 가운데 주 서식으로 바꾸고,
+// 아래 굵은 테두리 같은 마지막 주 서식은 새로 붙인 주가 갖는다. 인쇄 범위도 같이 늘린다.
+function addScheduleWeek(xml, wbXml, sheetName, lastStart, L, labelCol) {
+  const before = parseRows(xml);
+  const byR = Object.fromEntries(before.map((row) => [row.r, row]));
+  const openTag = (row) => xml.slice(row.start, row.innerStart);
+  const clones = [];
+  for (let k = 0; k < L; k++) {
+    const row = byR[lastStart + k];
+    if (!row) continue;
+    const cells = parseCells(row.inner)
+      .map((c) => {
+        const ref = `${indexToCol(c.col)}${row.r + L}`;
+        // 오전/오후/마감 같은 왼쪽 이름표는 그대로, 나머지는 서식만
+        if (c.col === labelCol) return row.inner.slice(c.start, c.end).replace(/^<c r="[A-Z]+\d+"/, `<c r="${ref}"`);
+        return `<c r="${ref}"${c.attrs.replace(/\st="\w+"/, "")}/>`;
+      })
+      .join("");
+    clones.push(`${openTag(row).replace(/<row r="\d+"/, `<row r="${row.r + L}"`)}${cells}</row>`);
+  }
+  const middleOpen = {};
+  for (let k = 0; k < L; k++) if (byR[lastStart - L + k]) middleOpen[lastStart + k] = openTag(byR[lastStart - L + k]).replace(/<row r="\d+"/, `<row r="${lastStart + k}"`);
+  xml = editSheetRows(xml, (row, api) => {
+    if (row.r < lastStart || row.r >= lastStart + L) return;
+    const mid = byR[row.r - L];
+    if (!mid) return;
+    for (const c of parseCells(mid.inner)) {
+      const s = styleOf(c);
+      if (s && api.cellAt(c.col)) api.restyle(c.col, s);
+    }
+  });
+  for (const [r, tag] of Object.entries(middleOpen)) xml = xml.replace(new RegExp(`<row r="${r}"[^>]*>`), tag);
+  const lastRow = parseRows(xml).find((row) => row.r === lastStart + L - 1);
+  xml = xml.slice(0, lastRow.end) + clones.join("") + xml.slice(lastRow.end);
+  xml = xml.replace(/<dimension ref="([A-Z]+\d+):([A-Z]+)(\d+)"/, (_, a, b, n) => `<dimension ref="${a}:${b}${Number(n) + L}"`);
+  wbXml = wbXml.replace(new RegExp(`(<definedName name="_xlnm\\.Print_Area"[^>]*>'?${escRe(sheetName)}'?!\\$[A-Z]+\\$\\d+:\\$[A-Z]+\\$)(\\d+)`), (_, head, n) => head + (Number(n) + L));
+  return { xml, wbXml };
+}
+
+// "N월 근무시간표" 달력 시트(Sheet1)를 앱 근무표로 채운다: 날짜, 그리고 날마다 오전/오후/마감 칸에
+// "이름 시작-끝"(예: 김예은 7-15, 이시헌 15-22.5). 한 칸 줄 수보다 사람이 많으면 마지막 줄에 " / "로 붙인다.
+function fillScheduleSheet(fflate, zip, month) {
+  const dec = (name) => fflate.strFromU8(zip[name]);
+  const sst = { xml: dec("xl/sharedStrings.xml") };
+  sst.strings = parseSharedStrings(sst.xml);
+  const titleIdx = sst.strings.findIndex((s) => /^\d+월 근무시간표$/.test(s));
+  if (titleIdx < 0) return;
+  let wbXml = dec("xl/workbook.xml");
+  const rels = dec("xl/_rels/workbook.xml.rels");
+  let path = null;
+  let sheetName = null;
+  for (const m of wbXml.matchAll(/<sheet name="([^"]+)"[^>]*r:id="(rId\d+)"/g)) {
+    const p = "xl/" + rels.match(new RegExp(`<Relationship Id="${m[2]}"[^>]*Target="([^"]+)"`))[1];
+    if (new RegExp(`<c r="[A-Z]+\\d+"[^>]*t="s"[^>]*><v>${titleIdx}</v>`).test(dec(p))) {
+      path = p;
+      sheetName = m[1];
+      break;
+    }
+  }
+  if (!path) return;
+
+  let xml = dec(path);
+  const text = (c) => cellText(c, sst.strings);
+  const scan = () => parseRows(xml).map((row) => ({ ...row, cells: parseCells(row.inner) }));
+  let rows = scan();
+  let hdr = null; // 일~토 머리글
+  for (const row of rows) {
+    const sun = row.cells.find((c) => text(c) === "일");
+    if (sun && ["월", "화", "수", "목", "금", "토"].every((w, i) => text(row.cells.find((c) => c.col === sun.col + i + 1)) === w)) {
+      hdr = { r: row.r, col: sun.col };
+      break;
+    }
+  }
+  if (!hdr) return;
+  const labelCol = hdr.col - 1;
+  const findDateRows = () =>
+    rows
+      .filter((row) => row.r > hdr.r && !text(row.cells.find((c) => c.col === labelCol)))
+      .filter((row) => row.cells.some((c) => c.col >= hdr.col && c.col < hdr.col + 7 && ((!c.type && c.raw != null) || row.inner.slice(c.start, c.end).includes("<f"))))
+      .map((row) => row.r);
+  let dateRows = findDateRows();
+  if (dateRows.length < 2) return;
+  const L = dateRows[1] - dateRows[0];
+
+  const days = monthDays(month);
+  const offset = weekdayOf(days[0]);
+  const weeks = Math.ceil((offset + days.length) / 7);
+  while (dateRows.length < weeks) {
+    ({ xml, wbXml } = addScheduleWeek(xml, wbXml, sheetName, dateRows.at(-1), L, labelCol));
+    rows = scan();
+    dateRows = [...dateRows, dateRows.at(-1) + L];
+  }
+
+  // 첫 주 칸을 보고 오전/오후/마감이 각각 몇째 줄인지 알아낸다
+  const byR = Object.fromEntries(rows.map((row) => [row.r, row]));
+  const cats = [];
+  for (let k = 1; k < L; k++) {
+    const label = text(byR[dateRows[0] + k]?.cells.find((c) => c.col === labelCol));
+    if (label) cats.push({ name: label.trim(), lines: [k] });
+    else if (cats.length) cats.at(-1).lines.push(k);
+  }
+  const hourOf = (t) => {
+    const [h, m] = t.split(":").map(Number);
+    return h + m / 60;
+  };
+  const catOf = (start) => (hourOf(start) < 12 ? "오전" : hourOf(start) < 17 ? "오후" : "마감");
+  const entries = (date, cat) =>
+    scheduledOn(date)
+      .map((e) => ({ e, s: shiftFor(e, date) }))
+      .filter(({ s }) => catOf(s.start) === cat)
+      .map(({ e, s }) => `${e.name} ${+hourOf(s.start).toFixed(2)}-${+hourOf(s.end).toFixed(2)}`);
+
+  const title = `${Number(month.slice(5, 7))}월 근무시간표`;
+  xml = editSheetRows(xml, (row, api) => {
+    for (const c of row.cells) if (c.type === "s" && Number(c.raw) === titleIdx) api.put(c.col, { v: sharedStringIndex(sst, title), t: "s" });
+    const w = dateRows.findIndex((r) => row.r >= r && row.r < r + L);
+    if (w < 0) return;
+    const k = row.r - dateRows[w];
+    const cat = cats.find((x) => x.lines.includes(k));
+    for (let d = 0; d < 7; d++) {
+      const col = hdr.col + d;
+      const n = w * 7 + d - offset + 1;
+      const date = n >= 1 && n <= days.length ? days[n - 1] : null;
+      if (k === 0) {
+        api.put(col, date ? { v: n } : {});
+        continue;
+      }
+      if (!cat) continue;
+      const list = date ? entries(date, cat.name) : [];
+      const line = cat.lines.indexOf(k);
+      const value = line === cat.lines.length - 1 ? list.slice(line).join(" / ") : list[line];
+      api.put(col, value ? { v: sharedStringIndex(sst, value), t: "s" } : {});
+    }
+  });
+  zip[path] = fflate.strToU8(xml);
+  zip["xl/workbook.xml"] = fflate.strToU8(wbXml);
+  zip["xl/sharedStrings.xml"] = fflate.strToU8(sst.xml);
+}
+
 // 풀어놓은 엑셀(zip)에 앱의 근무시간·수당을 채운다. adaptMonth면 먼저 양식을 이 달에 맞게 바꾼다.
 function fillWorkbook(fflate, zip, month, employeeId, { adaptMonth = false } = {}) {
     const ts = timesheet(month, employeeId);
     if (!ts.rows.length) throw new Error("이 달에는 입력할 근무 기록이 없어요.");
     const dec = (name) => fflate.strFromU8(zip[name]);
-    if (adaptMonth) adaptWorkbookMonth(fflate, zip, month);
+    if (adaptMonth) {
+      adaptWorkbookMonth(fflate, zip, month);
+      // 근무시간표 달력은 기본양식으로 새로 만들 때만 채운다 (자동입력 대상인 실제 파일엔 다음 달 표가 들어 있을 수 있음)
+      fillScheduleSheet(fflate, zip, month);
+    }
 
     // 바깥에서 셀 값만 고쳐 넣으면 엑셀이 캐시된 수식 결과를 그대로 보여줄 수 있어서,
     // 다음에 열 때 전체를 다시 계산하도록 표시해둔다.
