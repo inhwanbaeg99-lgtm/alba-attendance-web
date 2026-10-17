@@ -1701,9 +1701,10 @@ function exportStandardXlsx(button) {
     const border = { top: thin, bottom: thin, left: thin, right: thin };
     const center = { horizontal: "center", vertical: "center" };
     const style = (extra = {}) => ({ border, alignment: center, font: { name: "맑은 고딕", sz: 10 }, ...extra });
-    const blue = { fill: { patternType: "solid", fgColor: { rgb: "DCE9F7" } } };
-    const bold = { font: { name: "맑은 고딕", sz: 10, bold: true } };
-    const money = "#,##0";
+    const peach = { fill: { patternType: "solid", fgColor: { rgb: "F8E9DA" } } }; // 근로현황 머리글·주말 칸
+    const tan = { fill: { patternType: "solid", fgColor: { rgb: "F5E6C0" } } }; // 직원별 시트 항목명 칸
+    const money = '_-* #,##0_-;\\-* #,##0_-;_-* "-"_-;_-@_-'; // 원본 엑셀의 회계 서식
+    const hours1 = '_-* #,##0.0_-;\\-* #,##0.0_-;_-* "-"_-;_-@_-';
 
     const ts = timesheet(month, "", { includeAll: true });
     if (!ts.rows.length) throw new Error("이 달에 재직 중인 알바가 없어요.");
@@ -1725,10 +1726,10 @@ function exportStandardXlsx(button) {
         const ref = XLSX.utils.encode_cell({ r: R, c: C });
         wsRoot[ref] = wsRoot[ref] ?? { t: "s", v: "" };
         const day = C >= 2 && C < lastCol ? days[C - 2] : null;
-        const s = style(day && isWeekend(day) ? blue : {});
-        if (R < 2 || R === body.length + 2) s.font = { ...s.font, bold: true };
-        if (C >= 2 && typeof wsRoot[ref].v === "number") wsRoot[ref].z = "0.0";
-        if (C >= 2 && wsRoot[ref].f) wsRoot[ref].z = "0.0";
+        const isHeaderRow = R < 2 || R === body.length + 2;
+        const s = style({ ...(isHeaderRow || (day && isWeekend(day)) ? peach : {}), font: { name: "맑은 고딕", sz: isHeaderRow ? 11 : 9 } });
+        if (isHeaderRow) s.font = { ...s.font, bold: true };
+        if (C >= 2 && (typeof wsRoot[ref].v === "number" || wsRoot[ref].f)) wsRoot[ref].z = hours1;
         wsRoot[ref].s = s;
       }
     }
@@ -1770,9 +1771,8 @@ function exportStandardXlsx(button) {
         for (let C = 0; C <= range.e.c; C++) {
           const ref = XLSX.utils.encode_cell({ r: R, c: C });
           if (!wsPay[ref]) continue;
-          wsPay[ref].s = { border, font: { name: "맑은 고딕", sz: 10, bold: R === 0 }, ...(R === 0 ? blue : {}) };
-          if (R > 0 && C >= 2 && typeof wsPay[ref].v !== "string") wsPay[ref].z = C === 2 ? "0.0" : money;
-          if (R > 0 && wsPay[ref].f) wsPay[ref].z = C === 2 ? "0.0" : money;
+          wsPay[ref].s = { border, font: { name: "맑은 고딕", sz: 10, bold: R === 0 } };
+          if (R > 0 && C >= 2 && (typeof wsPay[ref].v === "number" || wsPay[ref].f)) wsPay[ref].z = C === 2 ? hours1 : money;
         }
       }
     }
@@ -1804,8 +1804,8 @@ function exportStandardXlsx(button) {
         for (let C = 0; C <= range.e.c; C++) {
           const ref = XLSX.utils.encode_cell({ r: R, c: C });
           if (!ws[ref]) continue;
-          ws[ref].s = { border, font: { name: "맑은 고딕", sz: 10, bold: C === 0 }, ...(C === 0 ? blue : {}) };
-          if (C === 1 && R > 0) ws[ref].z = money;
+          ws[ref].s = { border, font: { name: "맑은 고딕", sz: 14, bold: R === 9 }, ...(C === 0 ? tan : {}) };
+          if (C === 1) ws[ref].z = money;
         }
       }
       XLSX.utils.book_append_sheet(wb, ws, sheetNameFor(r.emp.name, used));
