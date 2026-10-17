@@ -1141,12 +1141,13 @@ function renderPaySheet(emp) {
 }
 
 // ---------- 급여 계산 ----------
-// 주휴수당: 월~일 한 주의 소정근로시간(근무표의 고정 근무 시간)이 15시간 이상이고
+// 주휴수당: 달력상 월~일이 아니라 그 달 1일부터 7일씩 끊은 주(1주/2주/3주...) 기준.
+//   그 주의 소정근로시간(근무표의 고정 근무 시간)이 15시간 이상이고
 //   근무표상 근무일에 모두 출근했으면, 그 주 실근무시간을 기준으로
 //   (실근무시간 ÷ 40) × 8시간 × 시급  (40시간 이상이면 8시간분)
 //   원래 근로기준법 제55조상 주휴수당은 "소정근로시간" 기준이 원칙이지만,
 //   이 사업장은 실제 근무한 시간 기준으로 계산하기로 함(실무 관행).
-//   주가 끝나는 일요일이 속한 달에 넣고, 아직 끝나지 않은 주는 계산하지 않는다.
+//   말일에 7일이 안 남는 자투리 기간과, 아직 끝나지 않은 주는 계산하지 않는다.
 // 세금(3.3%): 소득세 3% + 지방소득세(소득세의 10%), 10원 미만 절사, 소득세 1,000원 미만이면 걷지 않음(소액부징수).
 
 function monthRecords(ym, employeeId) {
@@ -1179,13 +1180,12 @@ function plannedHours(emp, days) {
 function weeklyAllowance(emp, ym) {
   const today = todayDateString();
   const [y, m] = ym.split("-").map(Number);
-  const last = `${ym}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
+  const monthLen = new Date(y, m, 0).getDate();
   const weeks = [];
-  // 이 달에 속한 일요일마다 그 주(월~일)를 본다
-  for (let d = `${ym}-01`; d <= last; d = addDays(d, 1)) {
-    if (weekdayOf(d) !== 0) continue;
-    const sun = d;
-    const mon = addDays(sun, -6);
+  // 달력상 월~일이 아니라, 그 달 1일부터 7일씩 끊어서 1주/2주/3주...로 본다 (말일에 7일이 안 남으면 그 자투리는 뺀다)
+  for (let offset = 0; offset + 7 <= monthLen; offset += 7) {
+    const mon = addDays(`${ym}-01`, offset);
+    const sun = addDays(mon, 6);
     const days = Array.from({ length: 7 }, (_, i) => addDays(mon, i));
     const recs = store.records.filter((r) => r.employeeId === emp.id && r.date >= mon && r.date <= sun);
     const hours = recs.reduce((sum, r) => sum + hoursBetween(r.clockIn, r.clockOut), 0);
@@ -1521,7 +1521,7 @@ function renderRecords() {
     </div>
     ${helpToggle(
       "records",
-      `주휴수당: 월~일 한 주의 소정근로시간(근무표의 고정 근무 시간)이 15시간 이상이고 근무표상 근무일에 모두 출근하면 (그 주 실근무시간 ÷ 40) × 8시간 × 시급. 그 주가 끝나는 일요일이 속한 달에 포함되고, 아직 끝나지 않은 주는 빠져요. 금액에 마우스를 올리면 주별 내역이 보여요.<br />
+      `주휴수당: 달력 월~일이 아니라 이 달 1일부터 7일씩 끊은 주(1주·2주·3주...) 기준이에요. 그 주의 소정근로시간(근무표의 고정 근무 시간)이 15시간 이상이고 근무표상 근무일에 모두 출근하면 (그 주 실근무시간 ÷ 40) × 8시간 × 시급. 말일에 7일이 안 남는 자투리 기간과 아직 끝나지 않은 주는 빠져요. 금액에 마우스를 올리면 주별 내역이 보여요.<br />
       수당(교육수당·특근수당 등)은 이름 옆 <b>명세서</b>를 눌러 입력해요.<br />
       ${taxOn ? "세금: 소득세 3% + 지방소득세(소득세의 10%), 10원 미만 절사. 소득세가 1,000원 미만이면 공제하지 않아요." : "세금을 공제하지 않고 계산했어요."}`,
     )}
