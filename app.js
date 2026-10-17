@@ -2028,38 +2028,44 @@ const serialOf = (iso) => {
 };
 
 // 날짜 열(firstCol부터 31칸)에서 양식 달의 주말/평일 서식을 보고, 새 달의 주말 위치에 맞게 서식을 바꾼다
-function restyleWeekends(xml, firstCol, oldDays, newDays) {
-  const weekend = (d) => Boolean(d) && [0, 6].includes(weekdayOf(d));
+// 날짜 열(firstCol부터 31칸)의 색칠을 새 달에 맞게 옮긴다. 양식에 어느 달 날짜가 있든 상관없이
+// 줄마다 가장 많이 쓴 서식 = 안 칠한 칸, 두 번째로 많이 쓴 서식(4칸 이상) = 칠한 칸으로 본다.
+// shaded(i)가 참인 칸을 칠한다. 첫 칸 테두리처럼 둘 다 아닌 특별 서식은 그대로 둔다.
+function restyleDayColumns(xml, firstCol, shaded) {
   return editSheetRows(xml, (row, api) => {
-    const common = (want) => {
-      const count = {};
-      oldDays.forEach((d, i) => {
-        if (weekend(d) !== want) return;
-        const s = styleOf(api.cellAt(firstCol + i));
-        if (s) count[s] = (count[s] || 0) + 1;
-      });
-      return Object.entries(count).sort((a, b) => b[1] - a[1])[0]?.[0];
-    };
-    const weekdayStyle = common(false);
-    const weekendStyle = common(true);
-    if (!weekdayStyle || !weekendStyle || weekdayStyle === weekendStyle) return;
+    const count = {};
     for (let i = 0; i < 31; i++) {
-      const c = api.cellAt(firstCol + i);
-      if (!c) continue;
-      const want = weekend(newDays[i]) ? weekendStyle : weekdayStyle;
-      if (styleOf(c) !== want) api.restyle(firstCol + i, want);
+      const s = styleOf(api.cellAt(firstCol + i));
+      if (s) count[s] = (count[s] || 0) + 1;
+    }
+    const ranked = Object.entries(count).sort((a, b) => b[1] - a[1]);
+    if (ranked.length < 2 || ranked[1][1] < 4) return;
+    const [plain, marked] = [ranked[0][0], ranked[1][0]];
+    for (let i = 0; i < 31; i++) {
+      const s = styleOf(api.cellAt(firstCol + i));
+      if (s !== plain && s !== marked) continue;
+      const want = shaded(i) ? marked : plain;
+      if (s !== want) api.restyle(firstCol + i, want);
     }
   });
 }
+// 근로현황: 토·일 칸을 칠함
+const restyleWeekends = (xml, firstCol, days) => restyleDayColumns(xml, firstCol, (i) => Boolean(days[i]) && [0, 6].includes(weekdayOf(days[i])));
+// 알바(사업소득): 주휴수당 주(일~토) 구간을 한 주 걸러 칠함 (2·4·6째 주)
+const restyleWeekBands = (xml, firstCol, days) => {
+  const segs = weekDayIndexRanges(days);
+  return restyleDayColumns(xml, firstCol, (i) => segs.findIndex(([s, e]) => i >= s && i <= e) % 2 === 1);
+};
 
 // 기본양식(다른 달 기준)을 이 달에 맞게 바꾼다: 근로현황 시트 이름·수식 참조, 날짜·요일, 주말 서식,
 // 알바(사업소득)의 요일·날짜 번호·주휴수당 주 구간 수식, "N월" 표시 글자
 function adaptWorkbookMonth(fflate, zip, month) {
   const dec = (name) => fflate.strFromU8(zip[name]);
   let wbXml = dec("xl/workbook.xml");
-  const found = wbXml.match(/<sheet name="(\d+)월 근로현황"/);
+  // 양식의 달은 숫자("9월 근로현황")거나, 달을 비워둔 양식이면 "○"("○월 근로현황")
+  const found = wbXml.match(/<sheet name="(\d+|○)월 근로현황"/);
   if (!found || !zip["xl/sharedStrings.xml"]) throw new Error('기본양식에서 "N월 근로현황" 시트를 찾지 못했어요. 기본양식 파일을 다시 골라주세요.');
-  const oldM = Number(found[1]);
+  const oldM = found[1] === "○" ? "○" : Number(found[1]);
   const newM = Number(month.slice(5, 7));
   const oldName = `${oldM}월 근로현황`;
   const newName = `${newM}월 근로현황`;
@@ -2081,7 +2087,7 @@ function adaptWorkbookMonth(fflate, zip, month) {
     for (const name of Object.keys(zip)) if (/^xl\/worksheets\/sheet\d+\.xml$/.test(name)) zip[name] = fflate.strToU8(swap(dec(name)));
     if (zip["docProps/app.xml"]) zip["docProps/app.xml"] = fflate.strToU8(dec("docProps/app.xml").split(`>${oldName}<`).join(`>${newName}<`));
     // "9월", "[9월 급여명세서(정미진)]" 같은 글자 속 달 표시 (앞이 숫자인 "19월" 같은 건 제외)
-    const monthToken = new RegExp(`(^|[^0-9])${oldM}월`, "g");
+    const monthToken = new RegExp(`(^|[^0-9])${escRe(String(oldM))}월`, "g");
     sst.xml = sst.xml.replace(/<si>([\s\S]*?)<\/si>/g, (all, inner) => {
       const text = decodeXmlText([...inner.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((x) => x[1]).join(""));
       if (!new RegExp(monthToken.source).test(text)) return all;
@@ -2091,20 +2097,31 @@ function adaptWorkbookMonth(fflate, zip, month) {
   }
   const weekdayIdx = WEEKDAYS.map((w) => sharedStringIndex(sst, w));
 
-  // 근로현황: 날짜 행(엑셀 날짜 숫자가 가장 많은 행)과 바로 아래 요일 행
+  // 근로현황: 날짜 행과 바로 아래 요일 행. 날짜가 들어 있으면 엑셀 날짜 숫자가 가장 많은 행,
+  // 날짜를 비워둔 양식이면 "구분" 머리글이 있는 행에서 같은 서식이 28칸 이상 이어지는 구간을 날짜 칸으로 본다.
   let rootXml = dec(rootPath);
   const rootRows = parseRows(rootXml).map((row) => ({ ...row, cells: parseCells(row.inner) }));
   let dateRow = null;
+  let firstCol = null;
   let best = 0;
   for (const row of rootRows.slice(0, 10)) {
     const n = row.cells.filter(isSerialCell).length;
     if (n > best) { best = n; dateRow = row; }
   }
-  if (!dateRow) throw new Error("기본양식의 근로현황 시트에서 날짜 행을 찾지 못했어요.");
-  const serials = dateRow.cells.filter(isSerialCell);
-  const firstCol = Math.min(...serials.map((c) => c.col));
-  const oldDays = monthDays(excelSerialToIso(Number(serials.find((c) => c.col === firstCol).raw)).slice(0, 7));
-  rootXml = restyleWeekends(rootXml, firstCol, oldDays, days);
+  if (dateRow) firstCol = Math.min(...dateRow.cells.filter(isSerialCell).map((c) => c.col));
+  else {
+    const label = findLabelCell(rootRows, sst.strings, "구분");
+    dateRow = label && rootRows.find((row) => row.r === label.row);
+    const cells = (dateRow?.cells ?? []).filter((c) => c.col > label.col).sort((a, b) => a.col - b.col);
+    for (let i = 0; i < cells.length; ) {
+      let j = i;
+      while (j + 1 < cells.length && cells[j + 1].col === cells[j].col + 1 && styleOf(cells[j + 1]) === styleOf(cells[i])) j++;
+      if (j - i + 1 >= 28) { firstCol = cells[i].col; break; }
+      i = j + 1;
+    }
+  }
+  if (!dateRow || firstCol == null) throw new Error("기본양식의 근로현황 시트에서 날짜 칸을 찾지 못했어요.");
+  rootXml = restyleWeekends(rootXml, firstCol, days);
   rootXml = editSheetRows(rootXml, (row, api) => {
     if (row.r === dateRow.r) for (let i = 0; i < 31; i++) api.put(firstCol + i, days[i] ? { v: serialOf(days[i]) } : {});
     if (row.r === dateRow.r + 1) for (let i = 0; i < 31; i++) api.put(firstCol + i, days[i] ? { v: weekdayIdx[weekdayOf(days[i])], t: "s" } : {});
@@ -2121,7 +2138,7 @@ function adaptWorkbookMonth(fflate, zip, month) {
     if (nameHdr) {
       const first = nameHdr.col + 1;
       const segs = weekDayIndexRanges(days);
-      x = restyleWeekends(x, first, oldDays, days);
+      x = restyleWeekBands(x, first, days);
       x = editSheetRows(x, (row, api) => {
         if (row.r === nameHdr.row) for (let i = 0; i < 31; i++) api.put(first + i, days[i] ? { v: weekdayIdx[weekdayOf(days[i])], t: "s" } : {});
         if (row.r === nameHdr.row + 1) for (let i = 0; i < 31; i++) api.put(first + i, days[i] ? { v: i + 1 } : {});
@@ -2190,7 +2207,7 @@ function fillScheduleSheet(fflate, zip, month) {
   const dec = (name) => fflate.strFromU8(zip[name]);
   const sst = { xml: dec("xl/sharedStrings.xml") };
   sst.strings = parseSharedStrings(sst.xml);
-  const titleIdx = sst.strings.findIndex((s) => /^\d+월 근무시간표$/.test(s));
+  const titleIdx = sst.strings.findIndex((s) => /^(\d+|○)월 근무시간표$/.test(s));
   if (titleIdx < 0) return;
   let wbXml = dec("xl/workbook.xml");
   const rels = dec("xl/_rels/workbook.xml.rels");
@@ -2220,12 +2237,10 @@ function fillScheduleSheet(fflate, zip, month) {
   }
   if (!hdr) return;
   const labelCol = hdr.col - 1;
-  const findDateRows = () =>
-    rows
-      .filter((row) => row.r > hdr.r && !text(row.cells.find((c) => c.col === labelCol)))
-      .filter((row) => row.cells.some((c) => c.col >= hdr.col && c.col < hdr.col + 7 && ((!c.type && c.raw != null) || row.inner.slice(c.start, c.end).includes("<f"))))
-      .map((row) => row.r);
-  let dateRows = findDateRows();
+  // 주마다 날짜 줄은 왼쪽 이름표가 비어 있고, 바로 다음 줄에 첫 칸 이름표(오전)가 있는 줄 (날짜를 비워둔 양식이어도 찾을 수 있게)
+  const labelOf = (r) => text(rows.find((row) => row.r === r)?.cells.find((c) => c.col === labelCol))?.trim();
+  const firstLabel = rows.filter((row) => row.r > hdr.r).map((row) => labelOf(row.r)).find(Boolean);
+  let dateRows = rows.filter((row) => row.r > hdr.r && !labelOf(row.r) && firstLabel && labelOf(row.r + 1) === firstLabel).map((row) => row.r);
   if (dateRows.length < 2) return;
   const L = dateRows[1] - dateRows[0];
 
