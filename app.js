@@ -1736,13 +1736,15 @@ function exportStandardXlsx(button) {
     wsRoot["!cols"] = [{ wch: 5 }, { wch: 9 }, ...days.map(() => ({ wch: 4.5 })), { wch: 7 }];
 
     // ---- 시트2: "급여정산" ----
-    const pay = [["No.", "이름", "근무시간", "시급", "급여액", "주휴수당", "교육수당", "지급총액", "소득세", "지방소득세", "차인지급액"]];
+    const pay = [["No.", "이름", "근무시간", "시급", "급여액", "주휴수당", "교육수당", "특근수당", "지급총액", "소득세", "지방소득세", "차인지급액"]];
     ts.rows.forEach((r, i) => {
       const r1 = i + 3; // 근로현황 쪽 행
       const r2 = i + 2; // 급여정산 쪽 행
       const emp = r.emp;
       const allow = allowancesFor(month, emp.id);
-      const extra = allow.reduce((sum, a) => sum + (Number(a.amount) || 0), 0);
+      const sumBy = (pick) => allow.filter(pick).reduce((sum, a) => sum + (Number(a.amount) || 0), 0);
+      const edu = sumBy((a) => (a.name || "").trim() === "교육수당");
+      const ot = sumBy((a) => (a.name || "").trim() !== "교육수당");
       const weeklyTerms = weekRanges
         .map(([s, e]) => {
           const a = indexToCol(3 + s), b = indexToCol(3 + e);
@@ -1756,15 +1758,16 @@ function exportStandardXlsx(button) {
         emp.hourlyWage,
         { t: "n", f: `ROUNDUP(C${r2}*D${r2},-1)` },
         { t: "n", f: weeklyTerms },
-        extra,
-        { t: "n", f: `E${r2}+F${r2}+G${r2}` },
-        taxOn ? { t: "n", f: `IF(ROUNDDOWN(H${r2}*0.03,-1)<1000,0,ROUNDDOWN(H${r2}*0.03,-1))` } : 0,
-        taxOn ? { t: "n", f: `ROUNDDOWN(I${r2}*0.1,-1)` } : 0,
-        { t: "n", f: `H${r2}-I${r2}-J${r2}` },
+        edu,
+        ot,
+        { t: "n", f: `E${r2}+F${r2}+G${r2}+H${r2}` },
+        taxOn ? { t: "n", f: `IF(ROUNDDOWN(I${r2}*0.03,-1)<1000,0,ROUNDDOWN(I${r2}*0.03,-1))` } : 0,
+        taxOn ? { t: "n", f: `ROUNDDOWN(J${r2}*0.1,-1)` } : 0,
+        { t: "n", f: `I${r2}-J${r2}-K${r2}` },
       ]);
     });
     const wsPay = XLSX.utils.aoa_to_sheet(pay);
-    wsPay["!cols"] = [{ wch: 5 }, { wch: 9 }, { wch: 9 }, { wch: 9 }, { wch: 11 }, { wch: 11 }, { wch: 10 }, { wch: 11 }, { wch: 9 }, { wch: 11 }, { wch: 11 }];
+    wsPay["!cols"] = [{ wch: 5 }, { wch: 9 }, { wch: 9 }, { wch: 9 }, { wch: 11 }, { wch: 11 }, { wch: 10 }, { wch: 10 }, { wch: 11 }, { wch: 9 }, { wch: 11 }, { wch: 11 }];
     {
       const range = XLSX.utils.decode_range(wsPay["!ref"]);
       for (let R = 0; R <= range.e.r; R++) {
@@ -1792,10 +1795,11 @@ function exportStandardXlsx(button) {
         ["급여액", { t: "n", f: `급여정산!E${r2}` }],
         ["주휴수당", { t: "n", f: `급여정산!F${r2}` }],
         ["교육수당", { t: "n", f: `급여정산!G${r2}` }],
-        ["지급총액", { t: "n", f: `급여정산!H${r2}` }],
-        ["소득세", { t: "n", f: `급여정산!I${r2}` }],
-        ["지방소득세", { t: "n", f: `급여정산!J${r2}` }],
-        ["차인지급액", { t: "n", f: `급여정산!K${r2}` }],
+        ["특근수당", { t: "n", f: `급여정산!H${r2}` }],
+        ["지급총액", { t: "n", f: `급여정산!I${r2}` }],
+        ["소득세", { t: "n", f: `급여정산!J${r2}` }],
+        ["지방소득세", { t: "n", f: `급여정산!K${r2}` }],
+        ["차인지급액", { t: "n", f: `급여정산!L${r2}` }],
       ];
       const ws = XLSX.utils.aoa_to_sheet(rowsAoa);
       ws["!cols"] = [{ wch: 12 }, { wch: 14 }];
@@ -1804,7 +1808,7 @@ function exportStandardXlsx(button) {
         for (let C = 0; C <= range.e.c; C++) {
           const ref = XLSX.utils.encode_cell({ r: R, c: C });
           if (!ws[ref]) continue;
-          ws[ref].s = { border, font: { name: "맑은 고딕", sz: 14, bold: R === 9 }, ...(C === 0 ? tan : {}) };
+          ws[ref].s = { border, font: { name: "맑은 고딕", sz: 14, bold: R === rowsAoa.length - 1 }, ...(C === 0 ? tan : {}) };
           if (C === 1) ws[ref].z = money;
         }
       }
@@ -1964,6 +1968,14 @@ function syncXlsx(button) {
         : workbookXml.replace("</workbook>", '<calcPr fullCalcOnLoad="1"/></workbook>');
     zip["xl/workbook.xml"] = fflate.strToU8(workbookXml);
 
+    // 수식을 값으로 바꾸는 칸이 생기면 calcChain(계산 순서표)이 없는 수식을 가리켜 엑셀이 "복구"를 띄운다.
+    // 지워두면 엑셀이 열 때 다시 만든다.
+    if (zip["xl/calcChain.xml"]) {
+      delete zip["xl/calcChain.xml"];
+      zip["[Content_Types].xml"] = fflate.strToU8(dec("[Content_Types].xml").replace(/<Override[^>]*PartName="\/xl\/calcChain\.xml"[^>]*\/>/, ""));
+      zip["xl/_rels/workbook.xml.rels"] = fflate.strToU8(dec("xl/_rels/workbook.xml.rels").replace(/<Relationship[^>]*Target="calcChain\.xml"[^>]*\/>/, ""));
+    }
+
     const sheetName = `${Number(month.slice(5, 7))}월 근로현황`;
     const sheetTag = workbookXml.match(new RegExp(`<sheet name="${escRe(sheetName)}"[^>]*r:id="(rId\\d+)"`));
     if (!sheetTag) throw new Error(`선택한 파일에서 "${sheetName}" 시트를 찾지 못했어요. 이 달 파일이 맞는지 확인해주세요.`);
@@ -2021,6 +2033,9 @@ function syncXlsx(button) {
         const col = colForDate[date];
         if (col === undefined) return;
         const ref = indexToCol(col) + row.r;
+        // 수식이 든 칸은 건드리지 않는다 (공유 수식의 원본 칸을 덮어쓰면 같은 수식을 쓰던 칸들이 깨져 파일이 안 열림)
+        const target = cells.find((c) => c.ref === ref);
+        if (target && inner.slice(target.start, target.end).includes("<f")) return;
         const hours = Math.round(empRow.cells[i] * 100) / 100;
         inner = patchCell(inner, cells, ref, col, hours > 0 ? hours : null);
         cells = parseCells(inner); // 다음 칸을 위해 인덱스 다시 계산
@@ -2035,8 +2050,8 @@ function syncXlsx(button) {
 
     zip[sheetPath] = fflate.strToU8(patched);
 
-    // "알바(사업소득)" 시트가 있으면 수당(기본 교육수당) 합계도 그 시트의 "교육수당" 칸에 넣는다.
-    // 급여액·주휴수당은 그 시트 안에서 이미 수식으로 자동 계산되니 손대지 않는다.
+    // "알바(사업소득)" 시트가 있으면 수당도 넣는다: 이름이 "교육수당"인 수당은 교육수당 칸,
+    // 나머지 이름의 수당은 전부 합쳐서 특근수당 칸. 급여액·주휴수당은 시트 안 수식이 계산한다.
     const albaTag = workbookXml.match(/<sheet name="알바\(사업소득\)"[^>]*r:id="(rId\d+)"/);
     if (albaTag) {
       const albaRel = dec("xl/_rels/workbook.xml.rels").match(new RegExp(`<Relationship Id="${albaTag[1]}"[^>]*Target="([^"]+)"`));
@@ -2044,19 +2059,34 @@ function syncXlsx(button) {
       const albaXml = dec(albaPath);
       const albaRows = parseRows(albaXml).map((row) => ({ ...row, cells: parseCells(row.inner) }));
       const nameHdr = findLabelCell(albaRows, strings, "성명");
-      const allowHdr = findLabelCell(albaRows, strings, "교육수당");
-      if (nameHdr && allowHdr) {
-        const headerRow = Math.max(nameHdr.row, allowHdr.row);
+      const eduHdr = findLabelCell(albaRows, strings, "교육수당");
+      const otHdr = findLabelCell(albaRows, strings, "특근수당");
+      if (nameHdr && (eduHdr || otHdr)) {
+        const headerRow = Math.max(nameHdr.row, eduHdr?.row ?? 0, otHdr?.row ?? 0);
         const albaDataRows = albaRows.filter((r) => r.r > headerRow);
         const payroll = payrollFor(month, employeeId);
+        const hasFormula = (row, col) => {
+          const c = row.cells.find((x) => x.col === col);
+          return Boolean(c && row.inner.slice(c.start, c.end).includes("<f"));
+        };
         let albaPatched = albaXml;
         for (const row of [...albaDataRows].sort((a, b) => b.r - a.r)) {
           const name = cellText(row.cells.find((c) => c.col === nameHdr.col), strings);
-          const empPayroll = payroll.rows.find((r) => r.emp.name === name);
-          if (!name || !empPayroll) continue;
-          const ref = indexToCol(allowHdr.col) + row.r;
-          const inner = patchCell(row.inner, row.cells, ref, allowHdr.col, empPayroll.extra > 0 ? empPayroll.extra : null);
-          albaPatched = albaPatched.slice(0, row.innerStart) + inner + albaPatched.slice(row.innerStart + row.inner.length);
+          const empPayroll = name ? payroll.rows.find((r) => r.emp.name === name) : null;
+          const sumBy = (pick) => (empPayroll ? empPayroll.allowances.filter(pick).reduce((s, a) => s + (Number(a.amount) || 0), 0) : 0);
+          const edu = sumBy((a) => (a.name || "").trim() === "교육수당");
+          const ot = sumBy((a) => (a.name || "").trim() !== "교육수당");
+          let inner = row.inner;
+          let cells = row.cells;
+          const write = (hdr, value) => {
+            inner = patchCell(inner, cells, indexToCol(hdr.col) + row.r, hdr.col, value > 0 ? value : null);
+            cells = parseCells(inner);
+          };
+          // 수당 칸에 원래 있던 수식(공유 수식)은 한 칸만 지우면 같은 수식을 쓰던 칸들이 깨지므로,
+          // 수식이 든 칸은 직원이 매칭되지 않아도 전부 앱 값(없으면 빈칸)으로 바꾼다.
+          if (eduHdr && (empPayroll || hasFormula(row, eduHdr.col))) write(eduHdr, edu);
+          if (otHdr && (empPayroll || hasFormula(row, otHdr.col))) write(otHdr, ot);
+          if (inner !== row.inner) albaPatched = albaPatched.slice(0, row.innerStart) + inner + albaPatched.slice(row.innerStart + row.inner.length);
         }
         zip[albaPath] = fflate.strToU8(albaPatched);
       }
