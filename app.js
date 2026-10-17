@@ -1101,6 +1101,7 @@ function renderRecordsMobile() {
     <div class="m-btns">
       <button type="button" class="btn-ghost" data-action="export-xlsx"${recs.length ? "" : " disabled"}>엑셀 다운로드</button>
       <button type="button" class="btn-ghost" data-action="sync-xlsx"${recs.length ? "" : " disabled"}>엑셀 파일에 자동입력</button>
+      <button type="button" class="btn-ghost" data-action="export-standard-xlsx">표준 양식 새로 만들기</button>
       <button type="button" class="btn-primary" data-action="payslip-pdf-all"${rows.length ? "" : " disabled"}>명세서 PDF 전체</button>
     </div>
     ${renderPayslipModal()}`,
@@ -1507,6 +1508,7 @@ function renderRecords() {
       <div class="head-actions">
         <button type="button" class="pill plain-dark" data-action="export-xlsx"${recs.length ? "" : " disabled"}>엑셀 다운로드</button>
         <button type="button" class="pill plain-dark" data-action="sync-xlsx"${recs.length ? "" : " disabled"}>엑셀 파일에 자동입력</button>
+        <button type="button" class="pill plain-dark" data-action="export-standard-xlsx">표준 양식 새로 만들기</button>
       </div>
     </div>
     ${renderTimesheet(month, employeeId)}
@@ -1661,6 +1663,155 @@ function exportXlsx(button) {
     XLSX.utils.book_append_sheet(wb, plain(weekly, [10, 12, 12, 12, 11, 10, 11, 20], 6), "주휴수당 내역");
     const who = employeeId ? `_${employeeById(employeeId).name}` : "";
     XLSX.writeFile(wb, `근무기록_${month}${who}.xlsx`);
+  });
+}
+
+// ---------- 엑셀 표준 양식 새로 만들기 (근로현황 + 급여정산 + 직원별 시트, 전부 수식으로 연결) ----------
+
+// days[i]가 속한 주(일~토, 월 경계는 안 넘음)의 [시작 인덱스, 끝 인덱스] 목록
+function weekDayIndexRanges(days) {
+  const ranges = [];
+  let i = 0;
+  while (i < days.length) {
+    const toSat = (6 - weekdayOf(days[i]) + 7) % 7;
+    const end = Math.min(i + toSat, days.length - 1);
+    ranges.push([i, end]);
+    i = end + 1;
+  }
+  return ranges;
+}
+
+function sheetNameFor(name, used) {
+  let base = name.replace(/[:\\/?*[\]]/g, "").slice(0, 31) || "직원";
+  let out = base;
+  let n = 2;
+  while (used.has(out)) out = `${base.slice(0, 28)}(${n++})`;
+  used.add(out);
+  return out;
+}
+
+function exportStandardXlsx(button) {
+  return withBusy(button, "만드는 중…", async () => {
+    const XLSX = await loadLib("xlsx");
+    const { month } = state.payroll;
+    const taxOn = store.settings?.tax !== "none";
+    const round2 = (n) => Math.round(n * 100) / 100;
+
+    const thin = { style: "thin", color: { rgb: "000000" } };
+    const border = { top: thin, bottom: thin, left: thin, right: thin };
+    const center = { horizontal: "center", vertical: "center" };
+    const style = (extra = {}) => ({ border, alignment: center, font: { name: "맑은 고딕", sz: 10 }, ...extra });
+    const blue = { fill: { patternType: "solid", fgColor: { rgb: "DCE9F7" } } };
+    const bold = { font: { name: "맑은 고딕", sz: 10, bold: true } };
+    const money = "#,##0";
+
+    const ts = timesheet(month, "", { includeAll: true });
+    if (!ts.rows.length) throw new Error("이 달에 재직 중인 알바가 없어요.");
+    const days = ts.days;
+    const lastDayCol = indexToCol(3 + days.length - 1);
+    const weekRanges = weekDayIndexRanges(days);
+
+    // ---- 시트1: "N월 근로현황" ----
+    const rootName = `${Number(month.slice(5, 7))}월 근로현황`;
+    const head1 = ["No.", "성명", ...days.map((d) => WEEKDAYS[weekdayOf(d)]), "합계"];
+    const head2 = ["", "", ...days.map((d) => Number(d.slice(8))), ""];
+    const body = ts.rows.map((r, i) => [i + 1, r.emp.name, ...r.cells.map((h) => (h ? round2(h) : "")), { t: "n", f: `SUM(C${i + 3}:${lastDayCol}${i + 3})` }]);
+    const totalRow = ["", "계", ...days.map((_, c) => ({ t: "n", f: `SUM(${indexToCol(3 + c)}3:${indexToCol(3 + c)}${body.length + 2})` })), { t: "n", f: `SUM(C${body.length + 3}:${lastDayCol}${body.length + 3})` }];
+    const wsRoot = XLSX.utils.aoa_to_sheet([head1, head2, ...body, totalRow]);
+    const lastCol = head1.length - 1;
+    const isWeekend = (d) => [0, 6].includes(weekdayOf(d));
+    for (let R = 0; R < body.length + 3; R++) {
+      for (let C = 0; C <= lastCol; C++) {
+        const ref = XLSX.utils.encode_cell({ r: R, c: C });
+        wsRoot[ref] = wsRoot[ref] ?? { t: "s", v: "" };
+        const day = C >= 2 && C < lastCol ? days[C - 2] : null;
+        const s = style(day && isWeekend(day) ? blue : {});
+        if (R < 2 || R === body.length + 2) s.font = { ...s.font, bold: true };
+        if (C >= 2 && typeof wsRoot[ref].v === "number") wsRoot[ref].z = "0.0";
+        if (C >= 2 && wsRoot[ref].f) wsRoot[ref].z = "0.0";
+        wsRoot[ref].s = s;
+      }
+    }
+    wsRoot["!cols"] = [{ wch: 5 }, { wch: 9 }, ...days.map(() => ({ wch: 4.5 })), { wch: 7 }];
+
+    // ---- 시트2: "급여정산" ----
+    const pay = [["No.", "이름", "근무시간", "시급", "급여액", "주휴수당", "교육수당", "지급총액", "소득세", "지방소득세", "차인지급액"]];
+    ts.rows.forEach((r, i) => {
+      const r1 = i + 3; // 근로현황 쪽 행
+      const r2 = i + 2; // 급여정산 쪽 행
+      const emp = r.emp;
+      const allow = allowancesFor(month, emp.id);
+      const extra = allow.reduce((sum, a) => sum + (Number(a.amount) || 0), 0);
+      const weeklyTerms = weekRanges
+        .map(([s, e]) => {
+          const a = indexToCol(3 + s), b = indexToCol(3 + e);
+          return `ROUNDUP(IF(SUM('${rootName}'!${a}${r1}:${b}${r1})>=15,D${r2}*8*SUM('${rootName}'!${a}${r1}:${b}${r1})/40,0),-1)`;
+        })
+        .join("+");
+      pay.push([
+        i + 1,
+        emp.name,
+        { t: "n", f: `SUM('${rootName}'!C${r1}:${lastDayCol}${r1})` },
+        emp.hourlyWage,
+        { t: "n", f: `ROUNDUP(C${r2}*D${r2},-1)` },
+        { t: "n", f: weeklyTerms },
+        extra,
+        { t: "n", f: `E${r2}+F${r2}+G${r2}` },
+        taxOn ? { t: "n", f: `IF(ROUNDDOWN(H${r2}*0.03,-1)<1000,0,ROUNDDOWN(H${r2}*0.03,-1))` } : 0,
+        taxOn ? { t: "n", f: `ROUNDDOWN(I${r2}*0.1,-1)` } : 0,
+        { t: "n", f: `H${r2}-I${r2}-J${r2}` },
+      ]);
+    });
+    const wsPay = XLSX.utils.aoa_to_sheet(pay);
+    wsPay["!cols"] = [{ wch: 5 }, { wch: 9 }, { wch: 9 }, { wch: 9 }, { wch: 11 }, { wch: 11 }, { wch: 10 }, { wch: 11 }, { wch: 9 }, { wch: 11 }, { wch: 11 }];
+    {
+      const range = XLSX.utils.decode_range(wsPay["!ref"]);
+      for (let R = 0; R <= range.e.r; R++) {
+        for (let C = 0; C <= range.e.c; C++) {
+          const ref = XLSX.utils.encode_cell({ r: R, c: C });
+          if (!wsPay[ref]) continue;
+          wsPay[ref].s = { border, font: { name: "맑은 고딕", sz: 10, bold: R === 0 }, ...(R === 0 ? blue : {}) };
+          if (R > 0 && C >= 2 && typeof wsPay[ref].v !== "string") wsPay[ref].z = C === 2 ? "0.0" : money;
+          if (R > 0 && wsPay[ref].f) wsPay[ref].z = C === 2 ? "0.0" : money;
+        }
+      }
+    }
+
+    // ---- 시트3+: 직원별 명세 ----
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, wsRoot, rootName);
+    XLSX.utils.book_append_sheet(wb, wsPay, "급여정산");
+
+    const used = new Set([rootName, "급여정산"]);
+    ts.rows.forEach((r, i) => {
+      const r2 = i + 2;
+      const rowsAoa = [
+        ["이름", { t: "str", f: `급여정산!B${r2}` }],
+        ["시급", { t: "n", f: `급여정산!D${r2}` }],
+        ["근무시간", { t: "n", f: `급여정산!C${r2}` }],
+        ["급여액", { t: "n", f: `급여정산!E${r2}` }],
+        ["주휴수당", { t: "n", f: `급여정산!F${r2}` }],
+        ["교육수당", { t: "n", f: `급여정산!G${r2}` }],
+        ["지급총액", { t: "n", f: `급여정산!H${r2}` }],
+        ["소득세", { t: "n", f: `급여정산!I${r2}` }],
+        ["지방소득세", { t: "n", f: `급여정산!J${r2}` }],
+        ["차인지급액", { t: "n", f: `급여정산!K${r2}` }],
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(rowsAoa);
+      ws["!cols"] = [{ wch: 12 }, { wch: 14 }];
+      const range = XLSX.utils.decode_range(ws["!ref"]);
+      for (let R = 0; R <= range.e.r; R++) {
+        for (let C = 0; C <= range.e.c; C++) {
+          const ref = XLSX.utils.encode_cell({ r: R, c: C });
+          if (!ws[ref]) continue;
+          ws[ref].s = { border, font: { name: "맑은 고딕", sz: 10, bold: C === 0 }, ...(C === 0 ? blue : {}) };
+          if (C === 1 && R > 0) ws[ref].z = money;
+        }
+      }
+      XLSX.utils.book_append_sheet(wb, ws, sheetNameFor(r.emp.name, used));
+    });
+
+    XLSX.writeFile(wb, `${month}_급여양식.xlsx`);
   });
 }
 
@@ -2589,6 +2740,9 @@ app.addEventListener("click", (e) => {
       return;
     case "sync-xlsx":
       syncXlsx(el);
+      return;
+    case "export-standard-xlsx":
+      exportStandardXlsx(el);
       return;
     case "payroll-prev":
     case "payroll-next":
