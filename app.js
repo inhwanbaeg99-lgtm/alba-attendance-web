@@ -140,7 +140,7 @@ function ensureColors(data = store) {
 }
 
 // 매니저는 근무표에만 나오고 출근·급여에서는 빠진다
-const MANAGER_SCHEDULE = { 1: "10:00~18:00", 2: "10:00~18:00", 5: "10:00~17:00", 6: "08:00~16:00", 0: "08:00~16:00" };
+const MANAGER_SCHEDULE = { 1: "10:00~18:00", 2: "10:00~18:00", 5: "10:00~18:00", 6: "08:00~16:00", 0: "08:00~16:00" };
 const INITIAL_SCHEDULE_META = { period: "2026. 10. 5 ~ 11. 8", notes: { 1: "24", 2: "23", 3: "26", 4: "27", 5: "27", 6: "34", 0: "32" } };
 
 const toWeekly = (days) => Object.fromEntries(Object.entries(days).map(([wd, range]) => [wd, parseRange(range)]));
@@ -1601,7 +1601,7 @@ function idbHandle(mode, key, value) {
   });
 }
 
-// key: "template"(자동입력할 파일) / "baseTemplate"(기본양식). 한 번 고르면 브라우저가 기억한다.
+// 한 번 고른 파일을 key 이름으로 브라우저가 기억한다 (지금은 "baseTemplate" = 기본양식).
 async function getTemplateHandle(key, mode) {
   if (!window.showOpenFilePicker) throw new Error("이 기능은 PC의 Chrome 또는 Edge 브라우저에서만 쓸 수 있어요.");
   const saved = await idbHandle("readonly", key).catch(() => null);
@@ -2061,16 +2061,13 @@ function fillScheduleSheet(fflate, zip, month) {
   zip["xl/sharedStrings.xml"] = fflate.strToU8(sst.xml);
 }
 
-// 풀어놓은 엑셀(zip)에 앱의 근무시간·수당을 채운다. adaptMonth면 먼저 양식을 이 달에 맞게 바꾼다.
-function fillWorkbook(fflate, zip, month, employeeId, { adaptMonth = false } = {}) {
+// 풀어놓은 기본양식(zip)을 이 달에 맞게 바꾸고, 근무표·근무시간·수당을 채운다.
+function fillWorkbook(fflate, zip, month, employeeId) {
     const ts = timesheet(month, employeeId);
     if (!ts.rows.length) throw new Error("이 달에는 입력할 근무 기록이 없어요.");
     const dec = (name) => fflate.strFromU8(zip[name]);
-    if (adaptMonth) {
-      adaptWorkbookMonth(fflate, zip, month);
-      // 근무시간표 달력은 기본양식으로 새로 만들 때만 채운다 (자동입력 대상인 실제 파일엔 다음 달 표가 들어 있을 수 있음)
-      fillScheduleSheet(fflate, zip, month);
-    }
+    adaptWorkbookMonth(fflate, zip, month);
+    fillScheduleSheet(fflate, zip, month);
 
     // 바깥에서 셀 값만 고쳐 넣으면 엑셀이 캐시된 수식 결과를 그대로 보여줄 수 있어서,
     // 다음에 열 때 전체를 다시 계산하도록 표시해둔다.
@@ -2158,7 +2155,9 @@ function fillWorkbook(fflate, zip, month, employeeId, { adaptMonth = false } = {
         // 수식이 든 칸은 건드리지 않는다 (공유 수식의 원본 칸을 덮어쓰면 같은 수식을 쓰던 칸들이 깨져 파일이 안 열림)
         const target = cells.find((c) => c.ref === ref);
         if (target && inner.slice(target.start, target.end).includes("<f")) return;
-        const hours = Math.round(empRow.cells[i] * 100) / 100;
+        // 매니저(역할이 매니저거나 이름이 매니저/매니져)는 근무일이면 항상 8시간으로 적는다
+        const manager = isManager(empRow.emp) || /^매니[저져]$/.test(empRow.emp.name.trim());
+        const hours = manager && empRow.cells[i] > 0 ? 8 : Math.round(empRow.cells[i] * 100) / 100;
         inner = patchCell(inner, cells, ref, col, hours > 0 ? hours : null);
         cells = parseCells(inner); // 다음 칸을 위해 인덱스 다시 계산
       });
@@ -2251,7 +2250,7 @@ function fillTemplateXlsx(button) {
     const zip = fflate.unzipSync(new Uint8Array(await (await handle.getFile()).arrayBuffer()));
     let notFound;
     try {
-      ({ notFound } = fillWorkbook(fflate, zip, month, "", { adaptMonth: true }));
+      ({ notFound } = fillWorkbook(fflate, zip, month, ""));
     } catch (err) {
       if (/기본양식/.test(err.message)) await idbHandle("readwrite", "baseTemplate", null); // 다음엔 다시 고르게
       throw err;
@@ -2278,16 +2277,17 @@ async function payslipPdf(button, empIds) {
     stage.className = "ps-stage";
     document.body.appendChild(stage);
     try {
-      const pdf = new jsPDF({ unit: "mm", format: "a4" });
+      // 한 명당 PDF 한 파일
       for (const [i, id] of empIds.entries()) {
-        const r = payrollRow(employeeById(id), month, recs);
-        stage.innerHTML = renderPayslip(r, month);
+        const emp = employeeById(id);
+        stage.innerHTML = renderPayslip(payrollRow(emp, month, recs), month);
         const canvas = await html2canvas(stage.firstElementChild, { scale: 2, backgroundColor: "#ffffff" });
-        if (i > 0) pdf.addPage();
+        const pdf = new jsPDF({ unit: "mm", format: "a4" });
         pdf.addImage(canvas.toDataURL("image/jpeg", 0.95), "JPEG", 0, 0, 210, 297);
+        // 연달아 내려받으면 브라우저가 막을 수 있어 조금씩 띄운다
+        if (i > 0) await new Promise((resolve) => setTimeout(resolve, 400));
+        pdf.save(`급여명세서_${month}_${emp.name}.pdf`);
       }
-      const who = empIds.length === 1 ? `_${employeeById(empIds[0]).name}` : "_전체";
-      pdf.save(`급여명세서_${month}${who}.pdf`);
     } finally {
       stage.remove();
     }
