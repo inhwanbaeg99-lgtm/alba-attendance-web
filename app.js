@@ -1841,8 +1841,16 @@ function syncXlsx(button) {
     const firstDateCol = Math.min(...Object.keys(colToDate).map(Number));
     const colForDate = Object.fromEntries(Object.entries(colToDate).map(([c, d]) => [d, Number(c)]));
 
+    // 날짜 행 바로 아래부터 행 번호가 끊기지 않고 이어지는 구간만 "직원 표"로 본다.
+    // 이 시트는 그 아래에 다른 표(날짜별 급여 등)가 또 있어서, 거기까지 다 긁으면
+    // 이름이 겹쳐서 엉뚱한 표에도 값을 써버릴 수 있다.
+    const sortedBelow = rowsWithCells.filter((r) => r.r > dateRow.r).sort((a, b) => a.r - b.r);
+    const dataRows = [];
+    for (let expectR = dateRow.r + 1, i = 0; i < sortedBelow.length && sortedBelow[i].r === expectR; i++, expectR++) {
+      dataRows.push(sortedBelow[i]);
+    }
+
     // 이름 열: 날짜 열보다 왼쪽에서 글자 칸이 가장 많은 열
-    const dataRows = rowsWithCells.filter((r) => r.r > dateRow.r);
     const strCountByCol = {};
     for (const row of dataRows) for (const c of row.cells) if (c.col < firstDateCol && cellText(c, strings) != null) strCountByCol[c.col] = (strCountByCol[c.col] || 0) + 1;
     const nameCol = Number(Object.entries(strCountByCol).sort((a, b) => b[1] - a[1])[0]?.[0]);
@@ -1896,7 +1904,8 @@ function syncXlsx(button) {
           const empPayroll = payroll.rows.find((r) => r.emp.name === name);
           if (!name || !empPayroll) continue;
           const ref = indexToCol(allowHdr.col) + row.r;
-          albaPatched = patchCell(albaPatched, row.cells, ref, allowHdr.col, empPayroll.extra > 0 ? empPayroll.extra : null);
+          const inner = patchCell(row.inner, row.cells, ref, allowHdr.col, empPayroll.extra > 0 ? empPayroll.extra : null);
+          albaPatched = albaPatched.slice(0, row.innerStart) + inner + albaPatched.slice(row.innerStart + row.inner.length);
         }
         zip[albaPath] = fflate.strToU8(albaPatched);
       }
