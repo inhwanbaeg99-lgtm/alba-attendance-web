@@ -1141,9 +1141,9 @@ function renderPaySheet(emp) {
 }
 
 // ---------- 급여 계산 ----------
-// 주휴수당: 주는 월~일 기준이되 월 경계는 안 넘는다. 1일이 월요일이 아니면 그 달
-//   첫 주는 1일부터 그 주 일요일까지로 짧게(예: 1일이 화요일이면 화~일), 말일도
-//   일요일이 아니면 마지막 주가 말일까지로 짧게 끝난다.
+// 주휴수당: 주는 일~토 기준이되 월 경계는 안 넘는다(엑셀 수식과 동일). 1일이 일요일이
+//   아니면 그 달 첫 주는 1일부터 그 주 토요일까지로 짧게(예: 1일이 화요일이면 화~토),
+//   말일도 토요일이 아니면 마지막 주가 말일까지로 짧게 끝난다.
 //   그 주의 소정근로시간(근무표의 고정 근무 시간)이 15시간 이상이고
 //   근무표상 근무일에 모두 출근했으면, 그 주 실근무시간을 기준으로
 //   (실근무시간 ÷ 40) × 8시간 × 시급  (40시간 이상이면 8시간분)
@@ -1185,12 +1185,12 @@ function weeklyAllowance(emp, ym) {
   const first = `${ym}-01`;
   const last = `${ym}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
   const weeks = [];
-  // 주는 월~일이 기준이지만, 월 경계는 안 넘는다. 1일이 월요일이 아니면 그 달 첫 주는
-  // 1일부터 그 주 일요일까지로 짧게 잡고(예: 1일이 화요일이면 화~일), 이후로는 월~일 그대로,
-  // 말일이 일요일이 아니면 마지막 주도 말일까지로 짧게 끝난다.
+  // 주는 일~토가 기준이지만, 월 경계는 안 넘는다. 1일이 일요일이 아니면 그 달 첫 주는
+  // 1일부터 그 주 토요일까지로 짧게 잡고(예: 1일이 화요일이면 화~토), 이후로는 일~토 그대로,
+  // 말일이 토요일이 아니면 마지막 주도 말일까지로 짧게 끝난다.
   for (let mon = first; mon <= last; ) {
-    const toSun = (7 - weekdayOf(mon)) % 7; // 월요일이면 6, 화요일이면 5...
-    let sun = addDays(mon, toSun);
+    const toSat = (6 - weekdayOf(mon) + 7) % 7; // 일요일이면 6, 월요일이면 5... 토요일이면 0
+    let sun = addDays(mon, toSat);
     if (sun > last) sun = last;
     const days = [];
     for (let x = mon; x <= sun; x = addDays(x, 1)) days.push(x);
@@ -1530,7 +1530,7 @@ function renderRecords() {
     </div>
     ${helpToggle(
       "records",
-      `주휴수당: 주는 월~일 기준이고 월 경계는 안 넘어요. 1일이 월요일이 아니면 그 달 첫 주는 1일부터 그 주 일요일까지로 짧게 잡고(예: 1일이 화요일이면 화~일), 말일도 일요일이 아니면 마지막 주가 말일까지로 짧게 끝나요. 그 주의 소정근로시간(근무표의 고정 근무 시간)이 15시간 이상이고 근무표상 근무일에 모두 출근하면 (그 주 실근무시간 ÷ 40) × 8시간 × 시급. 아직 끝나지 않은 주는 빠져요. 금액에 마우스를 올리면 주별 내역이 보여요.<br />
+      `주휴수당: 주는 일~토 기준이고 월 경계는 안 넘어요. 1일이 일요일이 아니면 그 달 첫 주는 1일부터 그 주 토요일까지로 짧게 잡고(예: 1일이 화요일이면 화~토), 말일도 토요일이 아니면 마지막 주가 말일까지로 짧게 끝나요. 그 주의 소정근로시간(근무표의 고정 근무 시간)이 15시간 이상이고 근무표상 근무일에 모두 출근하면 (그 주 실근무시간 ÷ 40) × 8시간 × 시급. 아직 끝나지 않은 주는 빠져요. 금액에 마우스를 올리면 주별 내역이 보여요.<br />
       수당(교육수당·특근수당 등)은 이름 옆 <b>명세서</b>를 눌러 입력해요.<br />
       ${taxOn ? "세금: 소득세 3% + 지방소득세(소득세의 10%), 10원 미만 절사. 소득세가 1,000원 미만이면 공제하지 않아요." : "세금을 공제하지 않고 계산했어요."}`,
     )}
@@ -1634,7 +1634,7 @@ function exportXlsx(button) {
       }),
     ];
 
-    const weekly = [["이름", "주 시작(월)", "주 끝(일)", "소정근로시간", "실근무시간", "주휴시간", "주휴수당", "비고"]];
+    const weekly = [["이름", "주 시작", "주 끝", "소정근로시간", "실근무시간", "주휴시간", "주휴수당", "비고"]];
     for (const r of rows) {
       for (const w of r.weekly.weeks) weekly.push([r.emp.name, w.mon, w.sun, round2(w.planned), round2(w.hours), round2(w.allowHours), w.amount, w.reason || ""]);
     }
@@ -1734,6 +1734,13 @@ function excelSerialToIso(serial) {
 function decodeXmlText(s) {
   return s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
 }
+// 칸의 글자 내용을 꺼낸다 (t="s"는 공유 문자열 색인, t="str"/"inlineStr"는 수식이 돌려준 글자 자체)
+function cellText(cell, strings) {
+  if (!cell) return null;
+  if (cell.type === "s") return strings[Number(cell.raw)];
+  if ((cell.type === "str" || cell.type === "inlineStr") && cell.raw != null) return decodeXmlText(cell.raw);
+  return null;
+}
 function parseSharedStrings(xml) {
   const out = [];
   for (const si of xml.matchAll(/<si>([\s\S]*?)<\/si>/g)) {
@@ -1761,6 +1768,16 @@ function parseCells(rowInner) {
     cells.push({ ref: m[1] + m[2], col: colToIndex(m[1]), type: tMatch ? tMatch[1] : null, raw: vMatch ? vMatch[1] : null, start: m.index, end: m.index + m[0].length, attrs: m[3] });
   }
   return cells;
+}
+
+// 시트 전체에서 글자가 label과 정확히 같은 칸을 찾는다 (헤더 위치 찾기용)
+function findLabelCell(rowsWithCells, strings, label) {
+  for (const row of rowsWithCells) {
+    for (const c of row.cells) {
+      if (cellText(c, strings) === label) return { row: row.r, col: c.col };
+    }
+  }
+  return null;
 }
 
 // row.inner 안에서 ref 칸을 새 값(숫자)으로 바꾸거나(value!=null) 비운다(value==null). 칸이 없으면 알맞은 위치에 새로 끼워 넣는다.
@@ -1824,10 +1841,10 @@ function syncXlsx(button) {
     const firstDateCol = Math.min(...Object.keys(colToDate).map(Number));
     const colForDate = Object.fromEntries(Object.entries(colToDate).map(([c, d]) => [d, Number(c)]));
 
-    // 이름 열: 날짜 열보다 왼쪽에서 글자(공유 문자열) 칸이 가장 많은 열
+    // 이름 열: 날짜 열보다 왼쪽에서 글자 칸이 가장 많은 열
     const dataRows = rowsWithCells.filter((r) => r.r > dateRow.r);
     const strCountByCol = {};
-    for (const row of dataRows) for (const c of row.cells) if (c.col < firstDateCol && c.type === "s") strCountByCol[c.col] = (strCountByCol[c.col] || 0) + 1;
+    for (const row of dataRows) for (const c of row.cells) if (c.col < firstDateCol && cellText(c, strings) != null) strCountByCol[c.col] = (strCountByCol[c.col] || 0) + 1;
     const nameCol = Number(Object.entries(strCountByCol).sort((a, b) => b[1] - a[1])[0]?.[0]);
     if (!Number.isFinite(nameCol)) throw new Error("시트에서 이름이 적힌 열을 찾지 못했어요.");
 
@@ -1835,8 +1852,8 @@ function syncXlsx(button) {
     const notFound = [];
     // 뒤에서부터 바꿔야 앞쪽 바뀐 내용이 뒤쪽 인덱스를 틀어지게 만들지 않는다
     for (const row of [...dataRows].sort((a, b) => b.r - a.r)) {
-      const nameCell = row.cells.find((c) => c.col === nameCol && c.type === "s");
-      const name = nameCell ? strings[Number(nameCell.raw)] : null;
+      const nameCell = row.cells.find((c) => c.col === nameCol);
+      const name = cellText(nameCell, strings);
       const empRow = ts.rows.find((r) => r.emp.name === name);
       if (!name || !empRow) continue;
       let inner = row.inner;
@@ -1852,12 +1869,39 @@ function syncXlsx(button) {
       patched = patched.slice(0, row.innerStart) + inner + patched.slice(row.innerStart + row.inner.length);
     }
     for (const empRow of ts.rows) {
-      if (!dataRows.some((row) => row.cells.some((c) => c.col === nameCol && c.type === "s" && strings[Number(c.raw)] === empRow.emp.name))) {
+      if (!dataRows.some((row) => cellText(row.cells.find((c) => c.col === nameCol), strings) === empRow.emp.name)) {
         notFound.push(empRow.emp.name);
       }
     }
 
     zip[sheetPath] = fflate.strToU8(patched);
+
+    // "알바(사업소득)" 시트가 있으면 수당(기본 교육수당) 합계도 그 시트의 "교육수당" 칸에 넣는다.
+    // 급여액·주휴수당은 그 시트 안에서 이미 수식으로 자동 계산되니 손대지 않는다.
+    const albaTag = workbookXml.match(/<sheet name="알바\(사업소득\)"[^>]*r:id="(rId\d+)"/);
+    if (albaTag) {
+      const albaRel = dec("xl/_rels/workbook.xml.rels").match(new RegExp(`<Relationship Id="${albaTag[1]}"[^>]*Target="([^"]+)"`));
+      const albaPath = "xl/" + albaRel[1];
+      const albaXml = dec(albaPath);
+      const albaRows = parseRows(albaXml).map((row) => ({ ...row, cells: parseCells(row.inner) }));
+      const nameHdr = findLabelCell(albaRows, strings, "성명");
+      const allowHdr = findLabelCell(albaRows, strings, "교육수당");
+      if (nameHdr && allowHdr) {
+        const headerRow = Math.max(nameHdr.row, allowHdr.row);
+        const albaDataRows = albaRows.filter((r) => r.r > headerRow);
+        const payroll = payrollFor(month, employeeId);
+        let albaPatched = albaXml;
+        for (const row of [...albaDataRows].sort((a, b) => b.r - a.r)) {
+          const name = cellText(row.cells.find((c) => c.col === nameHdr.col), strings);
+          const empPayroll = payroll.rows.find((r) => r.emp.name === name);
+          if (!name || !empPayroll) continue;
+          const ref = indexToCol(allowHdr.col) + row.r;
+          albaPatched = patchCell(albaPatched, row.cells, ref, allowHdr.col, empPayroll.extra > 0 ? empPayroll.extra : null);
+        }
+        zip[albaPath] = fflate.strToU8(albaPatched);
+      }
+    }
+
     const out = fflate.zipSync(zip, { level: 6 });
 
     const writable = await handle.createWritable();
