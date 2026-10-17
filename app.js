@@ -1101,6 +1101,7 @@ function renderRecordsMobile() {
     <div class="m-btns">
       <button type="button" class="btn-ghost" data-action="export-xlsx"${recs.length ? "" : " disabled"}>엑셀 다운로드</button>
       <button type="button" class="btn-ghost" data-action="sync-xlsx"${recs.length ? "" : " disabled"}>엑셀 파일에 자동입력</button>
+      <button type="button" class="btn-ghost" data-action="fill-template-xlsx"${recs.length ? "" : " disabled"}>기본양식으로 저장</button>
       <button type="button" class="btn-ghost" data-action="export-standard-xlsx">표준 양식 새로 만들기</button>
       <button type="button" class="btn-primary" data-action="payslip-pdf-all"${rows.length ? "" : " disabled"}>명세서 PDF 전체</button>
     </div>
@@ -1508,6 +1509,7 @@ function renderRecords() {
       <div class="head-actions">
         <button type="button" class="pill plain-dark" data-action="export-xlsx"${recs.length ? "" : " disabled"}>엑셀 다운로드</button>
         <button type="button" class="pill plain-dark" data-action="sync-xlsx"${recs.length ? "" : " disabled"}>엑셀 파일에 자동입력</button>
+        <button type="button" class="pill plain-dark" data-action="fill-template-xlsx"${recs.length ? "" : " disabled"}>기본양식으로 저장</button>
         <button type="button" class="pill plain-dark" data-action="export-standard-xlsx">표준 양식 새로 만들기</button>
       </div>
     </div>
@@ -1837,26 +1839,24 @@ function idbHandle(mode, key, value) {
   });
 }
 
-async function pickTemplateHandle() {
-  const [handle] = await window.showOpenFilePicker({
-    types: [{ description: "Excel 파일", accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"] } }],
-  });
-  await idbHandle("readwrite", "template", handle);
-  return handle;
-}
-
-async function getTemplateHandle() {
+// key: "template"(자동입력할 파일) / "baseTemplate"(기본양식). 한 번 고르면 브라우저가 기억한다.
+async function getTemplateHandle(key, mode) {
   if (!window.showOpenFilePicker) throw new Error("이 기능은 PC의 Chrome 또는 Edge 브라우저에서만 쓸 수 있어요.");
-  const saved = await idbHandle("readonly", "template").catch(() => null);
+  const saved = await idbHandle("readonly", key).catch(() => null);
   if (saved) {
     try {
-      const perm = (await saved.queryPermission({ mode: "readwrite" })) === "granted" || (await saved.requestPermission({ mode: "readwrite" })) === "granted";
-      if (perm) return saved;
+      const perm = (await saved.queryPermission({ mode })) === "granted" || (await saved.requestPermission({ mode })) === "granted";
+      if (perm) {
+        await saved.getFile(); // 옮겨지거나 지워졌으면 여기서 실패 -> 다시 고르기
+        return saved;
+      }
     } catch {
-      // 파일이 옮겨지거나 지워진 경우 등 -> 다시 선택
+      // 다시 고르기
     }
   }
-  return pickTemplateHandle();
+  const [handle] = await window.showOpenFilePicker({ types: [XLSX_TYPE] });
+  await idbHandle("readwrite", key, handle);
+  return handle;
 }
 
 // 엑셀 파일(zip) 안에서 날짜 칸의 <v>만 바꿔치기한다 (SheetJS로 전체를 다시 조립하면 서식이 깨지거나
@@ -1946,17 +1946,210 @@ function patchCell(rowInner, cells, ref, col, value) {
   return rowInner.slice(0, at) + newXml + rowInner.slice(at);
 }
 
-function syncXlsx(button) {
-  return withBusy(button, "입력하는 중…", async () => {
-    const fflate = await loadLib("fflate");
-    const { month, employeeId } = state.payroll;
+function xmlEsc(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+const attrsOf = (s) => Object.fromEntries([...s.matchAll(/([\w:]+)="([^"]*)"/g)].map((m) => [m[1], m[2]]));
+const styleOf = (cell) => cell?.attrs.match(/\ss="(\d+)"/)?.[1];
+
+// 칸을 통째로 새로 쓴다: v(값, t="s"면 공유 문자열 번호) 또는 f(수식). 둘 다 없으면 서식만 남긴 빈칸.
+function putCell(rowInner, cells, ref, col, { v = null, t = null, f = null } = {}) {
+  const existing = cells.find((c) => c.ref === ref);
+  const attrs = existing ? existing.attrs.replace(/\st="\w+"/, "") : "";
+  const tAttr = t ? ` t="${t}"` : "";
+  const xml = f != null ? `<c r="${ref}"${attrs}${tAttr}><f>${xmlEsc(f)}</f></c>` : v != null ? `<c r="${ref}"${attrs}${tAttr}><v>${v}</v></c>` : `<c r="${ref}"${attrs}/>`;
+  if (existing) return rowInner.slice(0, existing.start) + xml + rowInner.slice(existing.end);
+  if (v == null && f == null) return rowInner;
+  const next = cells.find((c) => c.col > col);
+  const at = next ? next.start : rowInner.length;
+  return rowInner.slice(0, at) + xml + rowInner.slice(at);
+}
+
+// 시트의 행마다 fn(row, api)를 불러 고친다. 뒤 행부터 고쳐서 앞 행들의 위치가 안 틀어지게 한다.
+function editSheetRows(xml, fn) {
+  const rows = parseRows(xml).map((row) => ({ ...row, cells: parseCells(row.inner) }));
+  for (const row of [...rows].sort((a, b) => b.r - a.r)) {
+    let inner = row.inner;
+    let cells = row.cells;
+    const cellAt = (col) => cells.find((c) => c.col === col);
+    const api = {
+      cellAt,
+      hasF: (col) => { const c = cellAt(col); return Boolean(c && inner.slice(c.start, c.end).includes("<f")); },
+      put: (col, opts) => { inner = putCell(inner, cells, indexToCol(col) + row.r, col, opts); cells = parseCells(inner); },
+      restyle: (col, s) => {
+        const c = cellAt(col);
+        if (!c) return;
+        const cx = inner.slice(c.start, c.end);
+        const nx = /\ss="\d+"/.test(c.attrs) ? cx.replace(/^(<c\b[^>]*?)\ss="\d+"/, `$1 s="${s}"`) : cx.replace(/^<c r="([A-Z]+\d+)"/, `<c r="$1" s="${s}"`);
+        inner = inner.slice(0, c.start) + nx + inner.slice(c.end);
+        cells = parseCells(inner);
+      },
+    };
+    fn(row, api);
+    if (inner !== row.inner) xml = xml.slice(0, row.innerStart) + inner + xml.slice(row.innerStart + row.inner.length);
+  }
+  return xml;
+}
+
+// 공유 수식에서 원본 칸(ref가 있는 칸)이 사라진 참조 수 — 하나라도 있으면 엑셀이 파일을 못 연다
+function orphanSharedRefs(xml) {
+  const masters = new Set();
+  const kids = [];
+  for (const m of xml.matchAll(/<f\b([^>]*?)\/?>/g)) {
+    const a = attrsOf(m[1]);
+    if (a.t !== "shared") continue;
+    if (a.ref) masters.add(a.si);
+    else kids.push(a.si);
+  }
+  return kids.filter((si) => !masters.has(si)).length;
+}
+
+function assertWorkbookIntact(fflate, zip) {
+  for (const name of Object.keys(zip)) {
+    if (/^xl\/worksheets\/sheet\d+\.xml$/.test(name) && orphanSharedRefs(fflate.strFromU8(zip[name]))) {
+      throw new Error("엑셀 파일 구조가 예상과 달라서 저장을 멈췄어요. 원본 파일은 그대로예요.");
+    }
+  }
+}
+
+function sharedStringIndex(sst, text) {
+  let i = sst.strings.indexOf(text);
+  if (i >= 0) return i;
+  i = sst.strings.length;
+  sst.strings.push(text);
+  sst.xml = sst.xml.replace("</sst>", `<si><t>${xmlEsc(text)}</t></si></sst>`).replace(/uniqueCount="\d+"/, `uniqueCount="${sst.strings.length}"`);
+  return i;
+}
+
+const isSerialCell = (c) => !c.type && c.raw && Number(c.raw) > 30000 && Number(c.raw) < 60000;
+const serialOf = (iso) => {
+  const [y, m, d] = iso.split("-").map(Number);
+  return Math.round((Date.UTC(y, m - 1, d) - Date.UTC(1899, 11, 30)) / 86400000);
+};
+
+// 날짜 열(firstCol부터 31칸)에서 양식 달의 주말/평일 서식을 보고, 새 달의 주말 위치에 맞게 서식을 바꾼다
+function restyleWeekends(xml, firstCol, oldDays, newDays) {
+  const weekend = (d) => Boolean(d) && [0, 6].includes(weekdayOf(d));
+  return editSheetRows(xml, (row, api) => {
+    const common = (want) => {
+      const count = {};
+      oldDays.forEach((d, i) => {
+        if (weekend(d) !== want) return;
+        const s = styleOf(api.cellAt(firstCol + i));
+        if (s) count[s] = (count[s] || 0) + 1;
+      });
+      return Object.entries(count).sort((a, b) => b[1] - a[1])[0]?.[0];
+    };
+    const weekdayStyle = common(false);
+    const weekendStyle = common(true);
+    if (!weekdayStyle || !weekendStyle || weekdayStyle === weekendStyle) return;
+    for (let i = 0; i < 31; i++) {
+      const c = api.cellAt(firstCol + i);
+      if (!c) continue;
+      const want = weekend(newDays[i]) ? weekendStyle : weekdayStyle;
+      if (styleOf(c) !== want) api.restyle(firstCol + i, want);
+    }
+  });
+}
+
+// 기본양식(다른 달 기준)을 이 달에 맞게 바꾼다: 근로현황 시트 이름·수식 참조, 날짜·요일, 주말 서식,
+// 알바(사업소득)의 요일·날짜 번호·주휴수당 주 구간 수식, "N월" 표시 글자
+function adaptWorkbookMonth(fflate, zip, month) {
+  const dec = (name) => fflate.strFromU8(zip[name]);
+  let wbXml = dec("xl/workbook.xml");
+  const found = wbXml.match(/<sheet name="(\d+)월 근로현황"/);
+  if (!found || !zip["xl/sharedStrings.xml"]) throw new Error('기본양식에서 "N월 근로현황" 시트를 찾지 못했어요. 기본양식 파일을 다시 골라주세요.');
+  const oldM = Number(found[1]);
+  const newM = Number(month.slice(5, 7));
+  const oldName = `${oldM}월 근로현황`;
+  const newName = `${newM}월 근로현황`;
+  const days = monthDays(month);
+  const rels = dec("xl/_rels/workbook.xml.rels");
+  const pathOf = (name) => {
+    const tag = wbXml.match(new RegExp(`<sheet name="${escRe(name)}"[^>]*r:id="(rId\\d+)"`));
+    return tag ? "xl/" + rels.match(new RegExp(`<Relationship Id="${tag[1]}"[^>]*Target="([^"]+)"`))[1] : null;
+  };
+  const rootPath = pathOf(oldName);
+  const albaPath = pathOf("알바(사업소득)");
+  const sst = { xml: dec("xl/sharedStrings.xml") };
+  sst.strings = parseSharedStrings(sst.xml);
+
+  if (oldM !== newM) {
+    const swap = (s) => s.split(`'${oldName}'!`).join(`'${newName}'!`).split(`&apos;${oldName}&apos;!`).join(`&apos;${newName}&apos;!`);
+    wbXml = swap(wbXml).replace(`<sheet name="${oldName}"`, `<sheet name="${newName}"`);
+    zip["xl/workbook.xml"] = fflate.strToU8(wbXml);
+    for (const name of Object.keys(zip)) if (/^xl\/worksheets\/sheet\d+\.xml$/.test(name)) zip[name] = fflate.strToU8(swap(dec(name)));
+    if (zip["docProps/app.xml"]) zip["docProps/app.xml"] = fflate.strToU8(dec("docProps/app.xml").split(`>${oldName}<`).join(`>${newName}<`));
+    sst.xml = sst.xml.replace(/<si>([\s\S]*?)<\/si>/g, (all, inner) => {
+      const text = [...inner.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((x) => x[1]).join("");
+      if (text === `${oldM}월`) return `<si><t>${newM}월</t></si>`;
+      if (text === oldName) return `<si><t>${xmlEsc(newName)}</t></si>`;
+      return all;
+    });
+    sst.strings = parseSharedStrings(sst.xml);
+  }
+  const weekdayIdx = WEEKDAYS.map((w) => sharedStringIndex(sst, w));
+
+  // 근로현황: 날짜 행(엑셀 날짜 숫자가 가장 많은 행)과 바로 아래 요일 행
+  let rootXml = dec(rootPath);
+  const rootRows = parseRows(rootXml).map((row) => ({ ...row, cells: parseCells(row.inner) }));
+  let dateRow = null;
+  let best = 0;
+  for (const row of rootRows.slice(0, 10)) {
+    const n = row.cells.filter(isSerialCell).length;
+    if (n > best) { best = n; dateRow = row; }
+  }
+  if (!dateRow) throw new Error("기본양식의 근로현황 시트에서 날짜 행을 찾지 못했어요.");
+  const serials = dateRow.cells.filter(isSerialCell);
+  const firstCol = Math.min(...serials.map((c) => c.col));
+  const oldDays = monthDays(excelSerialToIso(Number(serials.find((c) => c.col === firstCol).raw)).slice(0, 7));
+  rootXml = restyleWeekends(rootXml, firstCol, oldDays, days);
+  rootXml = editSheetRows(rootXml, (row, api) => {
+    if (row.r === dateRow.r) for (let i = 0; i < 31; i++) api.put(firstCol + i, days[i] ? { v: serialOf(days[i]) } : {});
+    if (row.r === dateRow.r + 1) for (let i = 0; i < 31; i++) api.put(firstCol + i, days[i] ? { v: weekdayIdx[weekdayOf(days[i])], t: "s" } : {});
+  });
+  zip[rootPath] = fflate.strToU8(rootXml);
+
+  // 알바(사업소득): 성명 행의 요일, 그 아래 날짜 번호, 주휴수당 1~5주 수식
+  if (albaPath) {
+    let x = dec(albaPath);
+    const rows = parseRows(x).map((row) => ({ ...row, cells: parseCells(row.inner) }));
+    const nameHdr = findLabelCell(rows, sst.strings, "성명");
+    const wageHdr = findLabelCell(rows, sst.strings, "시급");
+    const weekHdr = findLabelCell(rows, sst.strings, "주휴수당");
+    if (nameHdr) {
+      const first = nameHdr.col + 1;
+      const segs = weekDayIndexRanges(days);
+      x = restyleWeekends(x, first, oldDays, days);
+      x = editSheetRows(x, (row, api) => {
+        if (row.r === nameHdr.row) for (let i = 0; i < 31; i++) api.put(first + i, days[i] ? { v: weekdayIdx[weekdayOf(days[i])], t: "s" } : {});
+        if (row.r === nameHdr.row + 1) for (let i = 0; i < 31; i++) api.put(first + i, days[i] ? { v: i + 1 } : {});
+        if (weekHdr && wageHdr && row.r > weekHdr.row && api.hasF(weekHdr.col)) {
+          const wage = indexToCol(wageHdr.col) + row.r;
+          const term = ([s, e]) => {
+            const a = indexToCol(first + s) + row.r;
+            const b = indexToCol(first + e) + row.r;
+            return `ROUNDUP(IF(SUM(${a}:${b})>=15,${wage}*8*SUM(${a}:${b})/40,0),-1)`;
+          };
+          // 칸은 5개(1~5주). 주가 6개로 나뉘는 달은 마지막 칸에 남은 주를 합친다
+          for (let k = 0; k < 5; k++) {
+            const mine = k < 4 ? segs.slice(k, k + 1) : segs.slice(4);
+            api.put(weekHdr.col + k, mine.length ? { f: mine.map(term).join("+") } : { v: 0 });
+          }
+        }
+      });
+      zip[albaPath] = fflate.strToU8(x);
+    }
+  }
+  zip["xl/sharedStrings.xml"] = fflate.strToU8(sst.xml);
+}
+
+// 풀어놓은 엑셀(zip)에 앱의 근무시간·수당을 채운다. adaptMonth면 먼저 양식을 이 달에 맞게 바꾼다.
+function fillWorkbook(fflate, zip, month, employeeId, { adaptMonth = false } = {}) {
     const ts = timesheet(month, employeeId);
     if (!ts.rows.length) throw new Error("이 달에는 입력할 근무 기록이 없어요.");
-
-    const handle = await getTemplateHandle();
-    const file = await handle.getFile();
-    const zip = fflate.unzipSync(new Uint8Array(await file.arrayBuffer()));
     const dec = (name) => fflate.strFromU8(zip[name]);
+    if (adaptMonth) adaptWorkbookMonth(fflate, zip, month);
 
     // 바깥에서 셀 값만 고쳐 넣으면 엑셀이 캐시된 수식 결과를 그대로 보여줄 수 있어서,
     // 다음에 열 때 전체를 다시 계산하도록 표시해둔다.
@@ -2092,14 +2285,69 @@ function syncXlsx(button) {
       }
     }
 
-    const out = fflate.zipSync(zip, { level: 6 });
+    return { notFound };
+}
 
+const XLSX_TYPE = { description: "Excel 파일", accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"] } };
+
+// 엑셀 파일에 자동입력: 고른 파일 자체에 써넣는다
+function syncXlsx(button) {
+  return withBusy(button, "입력하는 중…", async () => {
+    const fflate = await loadLib("fflate");
+    const { month, employeeId } = state.payroll;
+    const handle = await getTemplateHandle("template", "readwrite");
+    const zip = fflate.unzipSync(new Uint8Array(await (await handle.getFile()).arrayBuffer()));
+    const { notFound } = fillWorkbook(fflate, zip, month, employeeId);
+    assertWorkbookIntact(fflate, zip);
     const writable = await handle.createWritable();
-    await writable.write(out);
+    await writable.write(fflate.zipSync(zip, { level: 6 }));
     await writable.close();
-
     if (notFound.length) window.alert(`엑셀에 입력했어요. 다만 "${notFound.join(", ")}" 이름은 시트에서 찾지 못해 건너뛰었어요.`);
     showToast("엑셀 파일에 입력했어요");
+  });
+}
+
+// 새 파일로 저장. 저장 위치 고르기 창은 클릭 직후에만 열 수 있어서, 안 되면 내려받기로 대신한다.
+async function saveXlsxBytes(bytes, name) {
+  if (window.showSaveFilePicker) {
+    try {
+      const handle = await window.showSaveFilePicker({ suggestedName: name, types: [XLSX_TYPE] });
+      const writable = await handle.createWritable();
+      await writable.write(bytes);
+      await writable.close();
+      return true;
+    } catch (err) {
+      if (err.name === "AbortError") return false;
+    }
+  }
+  const url = URL.createObjectURL(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+  const a = Object.assign(document.createElement("a"), { href: url, download: name });
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return true;
+}
+
+// 기본양식으로 저장: 처음 한 번 고른 기본양식(빈 양식)은 그대로 두고, 이 달 내용을 채운 새 파일을 만든다
+function fillTemplateXlsx(button) {
+  return withBusy(button, "만드는 중…", async () => {
+    const fflate = await loadLib("fflate");
+    const { month } = state.payroll;
+    const handle = await getTemplateHandle("baseTemplate", "read");
+    const zip = fflate.unzipSync(new Uint8Array(await (await handle.getFile()).arrayBuffer()));
+    let notFound;
+    try {
+      ({ notFound } = fillWorkbook(fflate, zip, month, "", { adaptMonth: true }));
+    } catch (err) {
+      if (/기본양식/.test(err.message)) await idbHandle("readwrite", "baseTemplate", null); // 다음엔 다시 고르게
+      throw err;
+    }
+    assertWorkbookIntact(fflate, zip);
+    const saved = await saveXlsxBytes(fflate.zipSync(zip, { level: 6 }), `메가커피 ${Number(month.slice(5, 7))}월 근무.xlsx`);
+    if (!saved) return;
+    if (notFound.length) window.alert(`저장했어요. 다만 "${notFound.join(", ")}" 이름은 기본양식에 줄이 없어서 빠졌어요. 기본양식에 그 직원 줄을 추가해주세요.`);
+    showToast("기본양식에 채워서 저장했어요");
   });
 }
 
@@ -2770,6 +3018,9 @@ app.addEventListener("click", (e) => {
       return;
     case "sync-xlsx":
       syncXlsx(el);
+      return;
+    case "fill-template-xlsx":
+      fillTemplateXlsx(el);
       return;
     case "export-standard-xlsx":
       exportStandardXlsx(el);
