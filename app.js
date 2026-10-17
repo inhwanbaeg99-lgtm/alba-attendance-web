@@ -1100,6 +1100,7 @@ function renderRecordsMobile() {
     </details>
     <div class="m-btns">
       <button type="button" class="btn-ghost" data-action="export-xlsx"${recs.length ? "" : " disabled"}>엑셀 다운로드</button>
+      <button type="button" class="btn-ghost" data-action="sync-xlsx"${recs.length ? "" : " disabled"}>엑셀 파일에 자동입력</button>
       <button type="button" class="btn-primary" data-action="payslip-pdf-all"${rows.length ? "" : " disabled"}>명세서 PDF 전체</button>
     </div>
     ${renderPayslipModal()}`,
@@ -1495,6 +1496,7 @@ function renderRecords() {
       <h3>근무 상세</h3>
       <div class="head-actions">
         <button type="button" class="pill plain-dark" data-action="export-xlsx"${recs.length ? "" : " disabled"}>엑셀 다운로드</button>
+        <button type="button" class="pill plain-dark" data-action="sync-xlsx"${recs.length ? "" : " disabled"}>엑셀 파일에 자동입력</button>
       </div>
     </div>
     ${renderTimesheet(month, employeeId)}
@@ -1648,6 +1650,128 @@ function exportXlsx(button) {
     XLSX.utils.book_append_sheet(wb, plain(weekly, [10, 12, 12, 12, 11, 10, 11, 20], 6), "주휴수당 내역");
     const who = employeeId ? `_${employeeById(employeeId).name}` : "";
     XLSX.writeFile(wb, `근무기록_${month}${who}.xlsx`);
+  });
+}
+
+// ---------- 엑셀 파일에 자동입력 (기존 급여 파일의 "N월 근로현황" 시트를 직접 수정) ----------
+// File System Access API로 한 번 고른 파일을 기억해서 다음부터는 바로 덮어쓴다 (Chrome/Edge PC 전용).
+
+function idbHandle(mode, key, value) {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open("alba-fs", 1);
+    req.onupgradeneeded = () => req.result.createObjectStore("handles");
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const tx = req.result.transaction("handles", mode);
+      const store = tx.objectStore("handles");
+      const op = mode === "readwrite" ? store.put(value, key) : store.get(key);
+      op.onsuccess = () => resolve(op.result);
+      op.onerror = () => reject(op.error);
+    };
+  });
+}
+
+async function pickTemplateHandle() {
+  const [handle] = await window.showOpenFilePicker({
+    types: [{ description: "Excel 파일", accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"] } }],
+  });
+  await idbHandle("readwrite", "template", handle);
+  return handle;
+}
+
+async function getTemplateHandle() {
+  if (!window.showOpenFilePicker) throw new Error("이 기능은 PC의 Chrome 또는 Edge 브라우저에서만 쓸 수 있어요.");
+  const saved = await idbHandle("readonly", "template").catch(() => null);
+  if (saved) {
+    try {
+      const perm = (await saved.queryPermission({ mode: "readwrite" })) === "granted" || (await saved.requestPermission({ mode: "readwrite" })) === "granted";
+      if (perm) return saved;
+    } catch {
+      // 파일이 옮겨지거나 지워진 경우 등 -> 다시 선택
+    }
+  }
+  return pickTemplateHandle();
+}
+
+// 날짜 숫자가 가장 많이 나온 행을 "날짜 행"으로 본다 (근로현황 시트는 사람이 만든 표라 행 위치가 고정돼 있지 않음)
+function findDateRow(XLSX, ws, range) {
+  let best = -1, bestCount = 0;
+  for (let R = range.s.r; R <= Math.min(range.s.r + 10, range.e.r); R++) {
+    let count = 0;
+    for (let C = range.s.c; C <= range.e.c; C++) {
+      const cell = ws[XLSX.utils.encode_cell({ r: R, c: C })];
+      if (cell && cell.t === "n" && cell.v > 30000 && cell.v < 60000) count++;
+    }
+    if (count > bestCount) { bestCount = count; best = R; }
+  }
+  return best;
+}
+
+function syncXlsx(button) {
+  return withBusy(button, "입력하는 중…", async () => {
+    const XLSX = await loadLib("xlsx");
+    const { month, employeeId } = state.payroll;
+    const ts = timesheet(month, employeeId);
+    if (!ts.rows.length) throw new Error("이 달에는 입력할 근무 기록이 없어요.");
+
+    const handle = await getTemplateHandle();
+    const file = await handle.getFile();
+    const wb = XLSX.read(await file.arrayBuffer(), { type: "array", cellStyles: true });
+
+    const sheetName = `${Number(month.slice(5, 7))}월 근로현황`;
+    const ws = wb.Sheets[sheetName];
+    if (!ws) throw new Error(`선택한 파일에서 "${sheetName}" 시트를 찾지 못했어요. 이 달 파일이 맞는지 확인해주세요.`);
+
+    const range = XLSX.utils.decode_range(ws["!ref"]);
+    const dateRow = findDateRow(XLSX, ws, range);
+    if (dateRow < 0) throw new Error("시트에서 날짜가 적힌 행을 찾지 못했어요.");
+
+    const colToDate = {};
+    for (let C = range.s.c; C <= range.e.c; C++) {
+      const cell = ws[XLSX.utils.encode_cell({ r: dateRow, c: C })];
+      if (!cell || cell.t !== "n") continue;
+      const d = XLSX.SSF.parse_date_code(cell.v);
+      if (d) colToDate[C] = `${d.y}-${String(d.m).padStart(2, "0")}-${String(d.d).padStart(2, "0")}`;
+    }
+    const firstDateCol = Math.min(...Object.keys(colToDate).map(Number));
+
+    // 이름 열: 날짜 열보다 왼쪽에서 글자 칸이 가장 많은 열
+    let nameCol = -1, bestStrCount = 0;
+    for (let C = range.s.c; C < firstDateCol; C++) {
+      let count = 0;
+      for (let R = dateRow + 1; R <= range.e.r; R++) {
+        const cell = ws[XLSX.utils.encode_cell({ r: R, c: C })];
+        if (cell && cell.t === "s") count++;
+      }
+      if (count > bestStrCount) { bestStrCount = count; nameCol = C; }
+    }
+    if (nameCol < 0) throw new Error("시트에서 이름이 적힌 열을 찾지 못했어요.");
+
+    const notFound = [];
+    for (const row of ts.rows) {
+      let targetRow = -1;
+      for (let R = dateRow + 1; R <= range.e.r; R++) {
+        const cell = ws[XLSX.utils.encode_cell({ r: R, c: nameCol })];
+        if (cell && cell.v === row.emp.name) { targetRow = R; break; }
+      }
+      if (targetRow < 0) { notFound.push(row.emp.name); continue; }
+      ts.days.forEach((date, i) => {
+        const col = Number(Object.keys(colToDate).find((c) => colToDate[c] === date));
+        if (Number.isNaN(col)) return;
+        const ref = XLSX.utils.encode_cell({ r: targetRow, c: col });
+        const hours = Math.round(row.cells[i] * 100) / 100;
+        if (hours > 0) ws[ref] = { ...ws[ref], t: "n", v: hours };
+        else delete ws[ref];
+      });
+    }
+
+    const out = XLSX.write(wb, { type: "array", bookType: "xlsx", cellStyles: true });
+    const writable = await handle.createWritable();
+    await writable.write(out);
+    await writable.close();
+
+    if (notFound.length) window.alert(`엑셀에 입력했어요. 다만 "${notFound.join(", ")}" 이름은 시트에서 찾지 못해 건너뛰었어요.`);
+    showToast("엑셀 파일에 입력했어요");
   });
 }
 
@@ -2315,6 +2439,9 @@ app.addEventListener("click", (e) => {
     }
     case "export-xlsx":
       exportXlsx(el);
+      return;
+    case "sync-xlsx":
+      syncXlsx(el);
       return;
     case "payroll-prev":
     case "payroll-next":
