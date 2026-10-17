@@ -1141,13 +1141,15 @@ function renderPaySheet(emp) {
 }
 
 // ---------- 급여 계산 ----------
-// 주휴수당: 달력상 월~일이 아니라 그 달 1일부터 7일씩 끊은 주(1주/2주/3주...) 기준.
+// 주휴수당: 주는 월~일 기준이되 월 경계는 안 넘는다. 1일이 월요일이 아니면 그 달
+//   첫 주는 1일부터 그 주 일요일까지로 짧게(예: 1일이 화요일이면 화~일), 말일도
+//   일요일이 아니면 마지막 주가 말일까지로 짧게 끝난다.
 //   그 주의 소정근로시간(근무표의 고정 근무 시간)이 15시간 이상이고
 //   근무표상 근무일에 모두 출근했으면, 그 주 실근무시간을 기준으로
 //   (실근무시간 ÷ 40) × 8시간 × 시급  (40시간 이상이면 8시간분)
 //   원래 근로기준법 제55조상 주휴수당은 "소정근로시간" 기준이 원칙이지만,
 //   이 사업장은 실제 근무한 시간 기준으로 계산하기로 함(실무 관행).
-//   말일에 7일이 안 남는 자투리 기간과, 아직 끝나지 않은 주는 계산하지 않는다.
+//   아직 끝나지 않은 주는 계산하지 않는다.
 // 세금(3.3%): 소득세 3% + 지방소득세(소득세의 10%), 10원 미만 절사, 소득세 1,000원 미만이면 걷지 않음(소액부징수).
 
 function monthRecords(ym, employeeId) {
@@ -1180,16 +1182,22 @@ function plannedHours(emp, days) {
 function weeklyAllowance(emp, ym) {
   const today = todayDateString();
   const [y, m] = ym.split("-").map(Number);
-  const monthLen = new Date(y, m, 0).getDate();
+  const first = `${ym}-01`;
+  const last = `${ym}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
   const weeks = [];
-  // 달력상 월~일이 아니라, 그 달 1일부터 7일씩 끊어서 1주/2주/3주...로 본다 (말일에 7일이 안 남으면 그 자투리는 뺀다)
-  for (let offset = 0; offset + 7 <= monthLen; offset += 7) {
-    const mon = addDays(`${ym}-01`, offset);
-    const sun = addDays(mon, 6);
-    const days = Array.from({ length: 7 }, (_, i) => addDays(mon, i));
+  // 주는 월~일이 기준이지만, 월 경계는 안 넘는다. 1일이 월요일이 아니면 그 달 첫 주는
+  // 1일부터 그 주 일요일까지로 짧게 잡고(예: 1일이 화요일이면 화~일), 이후로는 월~일 그대로,
+  // 말일이 일요일이 아니면 마지막 주도 말일까지로 짧게 끝난다.
+  for (let mon = first; mon <= last; ) {
+    const toSun = (7 - weekdayOf(mon)) % 7; // 월요일이면 6, 화요일이면 5...
+    let sun = addDays(mon, toSun);
+    if (sun > last) sun = last;
+    const days = [];
+    for (let x = mon; x <= sun; x = addDays(x, 1)) days.push(x);
     const recs = store.records.filter((r) => r.employeeId === emp.id && r.date >= mon && r.date <= sun);
     const hours = recs.reduce((sum, r) => sum + hoursBetween(r.clockIn, r.clockOut), 0);
-    if (!recs.length) continue;
+    const nextMon = addDays(sun, 1);
+    if (!recs.length) { mon = nextMon; continue; }
     const planned = plannedHours(emp, days);
     let reason = "";
     if (sun >= today) reason = "주가 아직 안 끝남";
@@ -1197,6 +1205,7 @@ function weeklyAllowance(emp, ym) {
     else if (days.some((x) => weeklyOn(emp, x)[weekdayOf(x)] && !recordFor(emp.id, x))) reason = "결근 있음";
     const allowHours = reason ? 0 : Math.min(hours, 40) / 5;
     weeks.push({ mon, sun, hours, planned, reason, allowHours, amount: Math.round(allowHours * emp.hourlyWage) });
+    mon = nextMon;
   }
   return { weeks, total: weeks.reduce((sum, w) => sum + w.amount, 0) };
 }
@@ -1521,7 +1530,7 @@ function renderRecords() {
     </div>
     ${helpToggle(
       "records",
-      `주휴수당: 달력 월~일이 아니라 이 달 1일부터 7일씩 끊은 주(1주·2주·3주...) 기준이에요. 그 주의 소정근로시간(근무표의 고정 근무 시간)이 15시간 이상이고 근무표상 근무일에 모두 출근하면 (그 주 실근무시간 ÷ 40) × 8시간 × 시급. 말일에 7일이 안 남는 자투리 기간과 아직 끝나지 않은 주는 빠져요. 금액에 마우스를 올리면 주별 내역이 보여요.<br />
+      `주휴수당: 주는 월~일 기준이고 월 경계는 안 넘어요. 1일이 월요일이 아니면 그 달 첫 주는 1일부터 그 주 일요일까지로 짧게 잡고(예: 1일이 화요일이면 화~일), 말일도 일요일이 아니면 마지막 주가 말일까지로 짧게 끝나요. 그 주의 소정근로시간(근무표의 고정 근무 시간)이 15시간 이상이고 근무표상 근무일에 모두 출근하면 (그 주 실근무시간 ÷ 40) × 8시간 × 시급. 아직 끝나지 않은 주는 빠져요. 금액에 마우스를 올리면 주별 내역이 보여요.<br />
       수당(교육수당·특근수당 등)은 이름 옆 <b>명세서</b>를 눌러 입력해요.<br />
       ${taxOn ? "세금: 소득세 3% + 지방소득세(소득세의 10%), 10원 미만 절사. 소득세가 1,000원 미만이면 공제하지 않아요." : "세금을 공제하지 않고 계산했어요."}`,
     )}
