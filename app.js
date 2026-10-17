@@ -1204,7 +1204,7 @@ function weeklyAllowance(emp, ym) {
     else if (planned < 15) reason = "소정근로 15시간 미만";
     else if (days.some((x) => weeklyOn(emp, x)[weekdayOf(x)] && !recordFor(emp.id, x))) reason = "결근 있음";
     const allowHours = reason ? 0 : Math.min(hours, 40) / 5;
-    weeks.push({ mon, sun, hours, planned, reason, allowHours, amount: Math.round(allowHours * emp.hourlyWage) });
+    weeks.push({ mon, sun, hours, planned, reason, allowHours, amount: Math.round((allowHours * emp.hourlyWage) / 10) * 10 });
     mon = nextMon;
   }
   return { weeks, total: weeks.reduce((sum, w) => sum + w.amount, 0) };
