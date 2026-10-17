@@ -2286,7 +2286,7 @@ async function payslipPdf(button, empIds) {
         pdf.addImage(canvas.toDataURL("image/jpeg", 0.95), "JPEG", 0, 0, 210, 297);
         // 연달아 내려받으면 브라우저가 막을 수 있어 조금씩 띄운다
         if (i > 0) await new Promise((resolve) => setTimeout(resolve, 400));
-        pdf.save(`급여명세서_${month}_${emp.name}.pdf`);
+        pdf.save(`${emp.name} ${Number(month.slice(5, 7))}월 급여명세서.pdf`);
       }
     } finally {
       stage.remove();
