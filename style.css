@@ -4358,3 +4358,136 @@ td.name {
   color: var(--red);
   font-weight: 700;
 }
+
+/* 근무 상세 사진 (카톡으로 보내기): 종이처럼 흰 바탕 고정 */
+.tsc {
+  width: 720px;
+  padding: 36px 32px 28px;
+  background: #ffffff;
+  color: #191f28;
+  font-family:
+    "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", -apple-system, sans-serif;
+}
+.tsc-store {
+  margin: 0 0 6px;
+  font-size: 15px;
+  color: #8b95a1;
+}
+.tsc h1 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+}
+.tsc-sum {
+  margin: 10px 0 22px;
+  font-size: 18px;
+  color: #4e5968;
+}
+.tsc-sum b {
+  color: #191f28;
+}
+.tsc-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  border-top: 1px solid #e5e8eb;
+  border-left: 1px solid #e5e8eb;
+}
+.tsc-wd,
+.tsc-cell {
+  border-right: 1px solid #e5e8eb;
+  border-bottom: 1px solid #e5e8eb;
+}
+.tsc-wd {
+  padding: 8px 0;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 600;
+  background: #f9fafb;
+}
+.tsc-cell {
+  min-height: 84px;
+  padding: 6px 6px 8px;
+  text-align: center;
+}
+.tsc-cell.blank,
+.tsc-cell.future {
+  background: #fbfbfc;
+}
+.tsc-dn {
+  display: block;
+  text-align: left;
+  font-size: 14px;
+  color: #8b95a1;
+}
+.tsc .sun {
+  color: #f04452;
+}
+.tsc-cell b {
+  display: block;
+  margin-top: 4px;
+  font-size: 24px;
+  font-weight: 700;
+}
+.tsc-cell small {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #8b95a1;
+}
+.tsc .over {
+  color: #3182f6;
+}
+.tsc .under {
+  color: #f04452;
+}
+.tsc-legend {
+  margin: 16px 0 0;
+  font-size: 13px;
+  color: #8b95a1;
+}
+
+.share-back {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.45);
+}
+.share-box {
+  width: min(480px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  padding: 16px;
+  border-radius: 20px;
+  background: var(--paper);
+}
+.share-box img {
+  display: block;
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+}
+.share-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+.share-actions button {
+  flex: 1;
+}
+.share-tip {
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: var(--ink-sub);
+}
+.m-share {
+  width: 100%;
+  margin-top: 12px;
+}
+.share-actions .btn-primary {
+  flex: 1.4;
+}

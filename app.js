@@ -1169,6 +1169,7 @@ function renderPaySheet(emp) {
     </ul>
     <p class="sheet-label">날짜별 근무</p>
     <ul class="m-days-list">${days || `<li><span>근무 기록이 없어요</span></li>`}</ul>
+    <button type="button" class="btn-ghost m-share" data-action="share-ts-image" data-id="${emp.id}">근무 내역 사진으로 카톡 보내기</button>
     <div class="sheet-actions">
       <button type="button" class="btn-ghost" data-action="open-payslip" data-id="${emp.id}">수당 · 명세서</button>
       <button type="button" class="btn-primary" data-action="payslip-pdf-one" data-id="${emp.id}">명세서 PDF</button>
@@ -1553,6 +1554,7 @@ function renderRecords() {
     <div class="section-head">
       <h3>근무 상세</h3>
       <div class="head-actions">
+        ${employeeId ? `<button type="button" class="pill" data-action="share-ts-image" data-id="${employeeId}">카톡으로 보내기</button>` : ""}
         <button type="button" class="pill plain-dark" data-action="fill-template-xlsx"${recs.length ? "" : " disabled"}>기본양식으로 저장</button>
       </div>
     </div>
@@ -2343,6 +2345,122 @@ async function payslipPdf(button, empIds) {
   });
 }
 
+// ---------- 근무 상세 사진 (카톡으로 보내기) ----------
+// 직원 한 명의 한 달 근무를 달력 모양 사진으로 만들어 휴대폰은 공유창(카톡), PC는 복사(카톡에 붙여넣기)로 보낸다.
+
+function renderTsCard(emp, ym) {
+  const [y, m] = ym.split("-").map(Number);
+  const { days, rows } = timesheet(ym, emp.id, { includeAll: true });
+  const row = rows[0];
+  const recs = monthRecords(ym, emp.id);
+  const today = todayDateString();
+  const lead = weekdayOf(days[0]);
+  const cells = days.map((d, j) => {
+    const saved = row?.cells[j] || 0;
+    const dayRecs = recs.filter((rec) => rec.date === d && rec.clockIn && rec.clockOut);
+    const range = dayRecs.map((rec) => `${formatTime(rec.clockIn)}~${formatTime(rec.clockOut)}`).join("<br />");
+    const wd = weekdayOf(d);
+    const dn = `<span class="tsc-dn${wd === 0 || HOLIDAYS[d] ? " sun" : ""}">${Number(d.slice(8))}</span>`;
+    if (d > today) return `<div class="tsc-cell future">${dn}</div>`;
+    if (!saved && d < today && emp.active && plannedOn(emp, d) > 0) {
+      return `<div class="tsc-cell">${dn}<b class="under">0</b><small class="under">미출근</small></div>`;
+    }
+    if (!saved) return `<div class="tsc-cell">${dn}</div>`;
+    return `<div class="tsc-cell">${dn}<b class="${diffClass(emp, d, saved).trim()}">${hour1(saved)}</b><small>${range}</small></div>`;
+  });
+  const workDays = row ? row.cells.filter((c) => c > 0).length : 0;
+  return `
+    <div class="tsc">
+      <p class="tsc-store">${esc(STORE_NAME)}</p>
+      <h1>${esc(emp.name)} · ${y}년 ${m}월 근무</h1>
+      <p class="tsc-sum">근무 <b>${workDays}일</b> · 총 <b>${row ? row.total.toFixed(1) : "0.0"}시간</b></p>
+      <div class="tsc-grid">
+        ${WEEKDAYS.map((w, i) => `<div class="tsc-wd${i === 0 ? " sun" : ""}">${w}</div>`).join("")}
+        ${'<div class="tsc-cell blank"></div>'.repeat(lead)}
+        ${cells.join("")}
+      </div>
+      <p class="tsc-legend"><span class="over">파랑</span> 근무표보다 많이 · <span class="under">빨강</span> 근무표보다 적게 · 숫자는 근무 시간</p>
+    </div>`;
+}
+
+async function shareTimesheetImage(button, empId) {
+  return withBusy(button, "사진 만드는 중…", async () => {
+    const html2canvas = await loadLib("html2canvas");
+    await document.fonts.ready;
+    const emp = employeeById(empId);
+    const { month } = state.payroll;
+    const stage = document.createElement("div");
+    stage.className = "ps-stage";
+    stage.innerHTML = renderTsCard(emp, month);
+    document.body.appendChild(stage);
+    let blob;
+    try {
+      const canvas = await html2canvas(stage.firstElementChild, { scale: 2, backgroundColor: "#ffffff" });
+      blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+    } finally {
+      stage.remove();
+    }
+    if (!blob) throw new Error("사진을 만들지 못했어요. 다시 시도해주세요.");
+    openSharePreview(new File([blob], `${emp.name} ${Number(month.slice(5, 7))}월 근무.png`, { type: "image/png" }));
+  });
+}
+
+// 미리보기 창: 사진을 확인하고 보내기 (공유·복사는 버튼을 누른 순간에 해야 브라우저가 허락한다)
+function openSharePreview(file) {
+  const url = URL.createObjectURL(file);
+  const canShare = !isDesktop() && navigator.canShare?.({ files: [file] });
+  const canCopy = isDesktop() && window.ClipboardItem && navigator.clipboard?.write;
+  const back = document.createElement("div");
+  back.className = "share-back";
+  back.innerHTML = `
+    <div class="share-box" role="dialog" aria-label="근무 사진 보내기">
+      <img src="${url}" alt="근무 상세 사진" />
+      <div class="share-actions">
+        <button type="button" class="btn-ghost" data-share="close">닫기</button>
+        <button type="button" class="btn-ghost" data-share="save">사진 저장</button>
+        ${canShare ? `<button type="button" class="btn-primary" data-share="send">카톡으로 보내기</button>` : ""}
+        ${canCopy ? `<button type="button" class="btn-primary" data-share="copy">복사하기</button>` : ""}
+      </div>
+      ${canCopy ? `<p class="share-tip">복사한 뒤 카카오톡 채팅방에서 ${/Mac/.test(navigator.platform) ? "⌘V" : "Ctrl+V"} 로 붙여넣으면 사진으로 보내져요.</p>` : ""}
+    </div>`;
+  const close = () => {
+    back.remove();
+    URL.revokeObjectURL(url);
+    document.removeEventListener("keydown", onKey);
+  };
+  const onKey = (e) => e.key === "Escape" && close();
+  document.addEventListener("keydown", onKey);
+  back.addEventListener("click", async (e) => {
+    if (e.target === back) return close();
+    const kind = e.target.closest("[data-share]")?.dataset.share;
+    if (kind === "close") close();
+    if (kind === "save") {
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = file.name;
+      a.click();
+    }
+    if (kind === "send") {
+      try {
+        await navigator.share({ files: [file] });
+        close();
+      } catch (err) {
+        if (err.name !== "AbortError") window.alert("공유를 열지 못했어요. 사진 저장 후 카톡에서 보내주세요.");
+      }
+    }
+    if (kind === "copy") {
+      try {
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": file })]);
+        close();
+        showToast("복사했어요. 카톡 채팅방에 붙여넣기 하세요");
+      } catch {
+        window.alert("복사하지 못했어요. 사진 저장 후 카톡에 끌어다 놓아주세요.");
+      }
+    }
+  });
+  document.body.appendChild(back);
+}
+
 // ---------- 주간 근무표 (게시용) ----------
 // 직원별 요일 근무 시간으로 자동 생성. 요일마다 시작 시간 순으로 비어 있는 칸에 배치한다.
 
@@ -3033,6 +3151,9 @@ app.addEventListener("click", (e) => {
     }
     case "fill-template-xlsx":
       fillTemplateXlsx(el);
+      return;
+    case "share-ts-image":
+      shareTimesheetImage(el, el.dataset.id);
       return;
     case "payroll-prev":
     case "payroll-next":
