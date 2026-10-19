@@ -836,7 +836,7 @@ function renderEmployees() {
     .map(
       (e, i) => `
       <tr style="--i:${i}">
-        <td class="name"><span class="name-cell"><span class="move-btns"><button type="button" class="move-btn" data-action="move-emp" data-id="${e.id}" data-dir="-1" aria-label="${esc(e.name)} 위로"${i === 0 ? " disabled" : ""}>▲</button><button type="button" class="move-btn" data-action="move-emp" data-id="${e.id}" data-dir="1" aria-label="${esc(e.name)} 아래로"${i === store.employees.length - 1 ? " disabled" : ""}>▼</button></span><span class="swatch" style="background:${cssColor(e.color)}" title="근무표 색 (자동)"></span>${nameLabel(e)}</span><div class="muted small">${esc(e.phone ? formatPhone(e.phone) : "")}</div></td>
+        <td class="name"><span class="name-cell"><span class="swatch" style="background:${cssColor(e.color)}" title="근무표 색 (자동)"></span>${nameLabel(e)}</span><div class="muted small">${esc(e.phone ? formatPhone(e.phone) : "")}</div></td>
         ${order
           .map(
             (wd) =>
@@ -1001,10 +1001,6 @@ function renderEmpSheet(e) {
     </div>
     <label class="sheet-label" for="m-wage">시급</label>
     <div class="m-wage"><input id="m-wage" class="field money" type="text" inputmode="numeric" value="${formatMoney(e.hourlyWage)}" data-wage="${e.id}" aria-label="${esc(e.name)} 시급" /><span>원</span></div>
-    <div class="m-toggles">
-      <button type="button" class="m-toggle" data-action="move-emp" data-id="${e.id}" data-dir="-1"${store.employees[0]?.id === e.id ? " disabled" : ""}>▲ 위로</button>
-      <button type="button" class="m-toggle" data-action="move-emp" data-id="${e.id}" data-dir="1"${store.employees.at(-1)?.id === e.id ? " disabled" : ""}>▼ 아래로</button>
-    </div>
     <div class="m-toggles">
       <button type="button" class="m-toggle${e.active ? " on" : ""}" data-action="toggle-active" data-id="${e.id}">${e.active ? "재직중" : "비활성"}</button>
       ${
@@ -3147,15 +3143,6 @@ app.addEventListener("click", (e) => {
       emp.active = !emp.active;
       save();
       queueToast(`${emp.name}님을 ${emp.active ? "재직중으로" : "비활성으로"} 바꿨어요`);
-      break;
-    }
-    case "move-emp": {
-      const i = store.employees.findIndex((x) => x.id === id);
-      const j = i + Number(el.dataset.dir);
-      if (i < 0 || j < 0 || j >= store.employees.length) return;
-      freezeScheduleOrder();
-      [store.employees[i], store.employees[j]] = [store.employees[j], store.employees[i]];
-      save();
       break;
     }
     case "remove-employee": {
