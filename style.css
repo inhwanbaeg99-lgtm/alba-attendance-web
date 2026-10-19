@@ -4516,3 +4516,10 @@ td.name {
 .sc-wide-stage thead th:first-child {
   width: 118px;
 }
+
+.loading-note {
+  margin: 120px 0;
+  text-align: center;
+  color: var(--ink-sub);
+  font-size: 15px;
+}

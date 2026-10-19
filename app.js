@@ -2851,10 +2851,22 @@ const homeHash = () => (ADMIN_SITE ? "#/calendar" : "#/");
 // 다시 그릴 때 입력 중이던 시간 칸 값을 지키는 칸들 (편집이 끝나면 칸이 사라지므로 그대로 남지 않는다)
 const KEEP_FIELDS = ["edit-start", "edit-end", "extra-name", "extra-start", "extra-end"];
 
+var waitedRemote = false;
+var loadWaitTimer = null;
 function render() {
   const kept = KEEP_FIELDS.map((id) => [id, document.getElementById(id)?.value]).filter(([, v]) => v);
   const focusedId = document.activeElement?.id;
   const r = route();
+  // 관리자: 온라인 데이터를 받기 전에는 이 기기에 남아 있던 예전 데이터(예전 직원 순서 등)를 잠깐 보여주지 않는다.
+  // 인터넷이 안 되면 3초 뒤에는 이 기기 데이터로 보여준다.
+  if (r.name !== "lock" && ADMIN_SITE && cloud && !remote.pubLoaded && !waitedRemote) {
+    app.innerHTML = `<p class="loading-note">불러오는 중…</p>`;
+    loadWaitTimer ??= setTimeout(() => {
+      waitedRemote = true;
+      render();
+    }, 3000);
+    return;
+  }
   if (r.name === "lock") app.innerHTML = renderLock();
   else if (r.name === "day") app.innerHTML = renderDayPage(r.date);
   else if (r.name === "calendar") app.innerHTML = renderAdminCalendar();
