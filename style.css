@@ -4513,6 +4513,38 @@ td.name {
   top: 0;
   width: 1100px;
 }
-.sc-wide-stage thead th:first-child {
-  width: 118px;
+/* 카톡 사진은 휴대폰으로 보므로 글자를 크게 (사진 한 장에 다 들어가게 표 너비는 그대로) */
+.sc-wide-stage .sched-sheet {
+  padding: 20px 16px 12px;
+  background: #ffffff;
+}
+.sc-wide-stage .sched thead th:first-child {
+  width: 136px;
+}
+.sc-wide-stage .sched th {
+  height: 44px;
+  font-size: 22px !important;
+}
+.sc-wide-stage .sched td {
+  height: 40px !important;
+  padding: 0 2px;
+  font-size: 20px !important;
+  font-weight: 600;
+}
+.sc-wide-stage .sched td.sc-time {
+  font-size: 18px !important;
+  font-weight: 500;
+}
+.sc-wide-stage .sc-print-head .ps-brand,
+.sc-wide-stage .sc-title {
+  font-size: 30px !important;
+}
+.sc-wide-stage .sc-note input {
+  font-size: 20px !important;
+}
+.sc-wide-stage .sc-brand {
+  font-size: 15px !important;
+}
+.sc-wide-stage .sc-print-period {
+  font-size: 26px !important;
 }
