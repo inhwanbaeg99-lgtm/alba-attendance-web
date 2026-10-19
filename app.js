@@ -2408,6 +2408,7 @@ async function shareTimesheetImage(button, empId) {
       if (state.payroll.employeeId !== empId) return "복사했어요. 카톡 채팅방에 붙여넣기 하세요";
       // 마지막 직원까지 보냈으면 전체로 돌아간다
       state.payroll.employeeId = next?.id ?? "";
+      state.nextFlashAt = Date.now();
       render();
       return next ? `복사했어요. 다음 직원 ${next.name}(으)로 넘어갔어요` : "복사했어요. 마지막 직원이라 전체로 돌아갔어요";
     });
@@ -2885,6 +2886,17 @@ function render() {
   if (period) fitPeriod(period);
   placeNavPill();
   if (state.pageEnter && r.name === "records") countUp(app.querySelectorAll(".pay-table td.net, .m-main .net"));
+  // 카톡 복사 후 다음 직원으로 넘어갔음을 보여준다: 직원 칸 반짝, 표 새로 들어옴, 전송 버튼 두근
+  // (저장 직후 다시 그려져도 이어서 돌도록 지난 시간만큼 앞당겨 시작)
+  const flashMs = Date.now() - (state.nextFlashAt ?? 0);
+  if (flashMs < 2600 && r.name === "records") {
+    for (const sel of ["#r-emp", ".ts-desktop", '[data-action="share-ts-image"]']) {
+      const el = app.querySelector(sel);
+      if (!el) continue;
+      el.style.setProperty("--flash-t", `${flashMs}ms`);
+      el.classList.add("next-flash");
+    }
+  }
   state.pageEnter = false;
   state.monthDir = null;
   state.expandEnter = false;
