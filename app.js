@@ -2405,10 +2405,11 @@ async function shareTimesheetImage(button, empId) {
       // PC: 복사하면 직원 칸을 다음 직원으로 넘긴다 (한 명씩 이어서 보내기 쉽게)
       const list = store.employees.filter((e) => !isManager(e));
       const next = list[list.findIndex((e) => e.id === empId) + 1];
-      if (!next || state.payroll.employeeId !== empId) return "복사했어요. 카톡 채팅방에 붙여넣기 하세요";
-      state.payroll.employeeId = next.id;
+      if (state.payroll.employeeId !== empId) return "복사했어요. 카톡 채팅방에 붙여넣기 하세요";
+      // 마지막 직원까지 보냈으면 전체로 돌아간다
+      state.payroll.employeeId = next?.id ?? "";
       render();
-      return `복사했어요. 다음 직원 ${next.name}(으)로 넘어갔어요`;
+      return next ? `복사했어요. 다음 직원 ${next.name}(으)로 넘어갔어요` : "복사했어요. 마지막 직원이라 전체로 돌아갔어요";
     });
   });
 }
