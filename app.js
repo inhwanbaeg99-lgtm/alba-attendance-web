@@ -1169,7 +1169,7 @@ function renderPaySheet(emp) {
     </ul>
     <p class="sheet-label">날짜별 근무</p>
     <ul class="m-days-list">${days || `<li><span>근무 기록이 없어요</span></li>`}</ul>
-    <button type="button" class="btn-ghost m-share" data-action="share-ts-image" data-id="${emp.id}">근무 내역 사진으로 카톡 보내기</button>
+    <button type="button" class="btn-ghost m-share" data-action="share-ts-image" data-id="${emp.id}">카카오톡 전송하기</button>
     <div class="sheet-actions">
       <button type="button" class="btn-ghost" data-action="open-payslip" data-id="${emp.id}">수당 · 명세서</button>
       <button type="button" class="btn-primary" data-action="payslip-pdf-one" data-id="${emp.id}">명세서 PDF</button>
@@ -1554,7 +1554,7 @@ function renderRecords() {
     <div class="section-head">
       <h3>근무 상세</h3>
       <div class="head-actions">
-        ${employeeId ? `<button type="button" class="pill" data-action="share-ts-image" data-id="${employeeId}">카톡으로 보내기</button>` : ""}
+        ${employeeId ? `<button type="button" class="pill" data-action="share-ts-image" data-id="${employeeId}">카카오톡 전송하기</button>` : ""}
         <button type="button" class="pill plain-dark" data-action="fill-template-xlsx"${recs.length ? "" : " disabled"}>기본양식으로 저장</button>
       </div>
     </div>
@@ -2418,7 +2418,7 @@ function openSharePreview(file) {
       <div class="share-actions">
         <button type="button" class="btn-ghost" data-share="close">닫기</button>
         <button type="button" class="btn-ghost" data-share="save">사진 저장</button>
-        ${canShare ? `<button type="button" class="btn-primary" data-share="send">카톡으로 보내기</button>` : ""}
+        ${canShare ? `<button type="button" class="btn-primary" data-share="send">카카오톡 전송하기</button>` : ""}
         ${canCopy ? `<button type="button" class="btn-primary" data-share="copy">복사하기</button>` : ""}
       </div>
       ${canCopy ? `<p class="share-tip">복사한 뒤 카카오톡 채팅방에서 ${/Mac/.test(navigator.platform) ? "⌘V" : "Ctrl+V"} 로 붙여넣으면 사진으로 보내져요.</p>` : ""}
