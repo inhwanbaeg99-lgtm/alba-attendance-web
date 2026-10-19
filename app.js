@@ -2409,15 +2409,18 @@ async function shareTimesheetImage(button, empId) {
     }
     if (!blob) throw new Error("사진을 만들지 못했어요. 다시 시도해주세요.");
     openSharePreview(new File([blob], `${emp.name} ${Number(month.slice(5, 7))}월 근무.png`, { type: "image/png" }), () => {
-      // PC: 복사하면 직원 칸을 다음 직원으로 넘긴다 (한 명씩 이어서 보내기 쉽게)
-      const list = store.employees.filter((e) => !isManager(e));
-      const next = list[list.findIndex((e) => e.id === empId) + 1];
+      // PC: 복사하면 아직 안 보낸 다음 직원으로 넘긴다 (끝까지 가면 앞에서 안 보낸 사람으로, 다 보내면 전체로)
       if (state.payroll.employeeId !== empId) return "복사했어요. 카톡 채팅방에 붙여넣기 하세요";
-      // 마지막 직원까지 보냈으면 전체로 돌아간다
+      if (state.sent?.month !== month) state.sent = { month, ids: new Set() };
+      state.sent.ids.add(empId);
+      const list = store.employees.filter((e) => !isManager(e));
+      const at = list.findIndex((e) => e.id === empId);
+      const next = [...list.slice(at + 1), ...list.slice(0, at)].find((e) => !state.sent.ids.has(e.id));
       state.payroll.employeeId = next?.id ?? "";
+      if (!next) state.sent = null;
       state.nextFlashAt = Date.now();
       render();
-      return next ? `복사했어요. 다음 직원 ${next.name}(으)로 넘어갔어요` : "복사했어요. 마지막 직원이라 전체로 돌아갔어요";
+      return next ? `복사했어요. 다음 직원 ${next.name}(으)로 넘어갔어요` : "모두 보냈어요. 전체로 돌아갔어요";
     });
   });
 }
