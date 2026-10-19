@@ -2379,7 +2379,7 @@ function renderTsCard(emp, ym) {
         ${'<div class="tsc-cell blank"></div>'.repeat(lead)}
         ${cells.join("")}
       </div>
-      <p class="tsc-legend"><span class="over">파랑</span> 근무표보다 많이 · <span class="under">빨강</span> 근무표보다 적게 · 숫자는 근무 시간</p>
+      <p class="tsc-legend"><i class="tsc-dot over"></i>근무시간보다 많이 · <i class="tsc-dot under"></i>근무시간보다 적게 · 숫자는 근무 시간</p>
     </div>`;
 }
 

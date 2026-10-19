@@ -4491,3 +4491,17 @@ td.name {
 .share-actions .btn-primary {
   flex: 1.4;
 }
+.tsc-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 5px;
+  border-radius: 50%;
+  vertical-align: -1px;
+}
+.tsc-dot.over {
+  background: #3182f6;
+}
+.tsc-dot.under {
+  background: #f04452;
+}
