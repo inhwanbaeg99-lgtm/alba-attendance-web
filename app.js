@@ -3244,8 +3244,9 @@ app.addEventListener("click", (e) => {
         // 저장할 근무표(아직 저장 전인 기간 포함)의 시작일
         const start = scheduleStart(state.schedWork?.meta?.period ?? store.scheduleMeta?.period ?? "");
         const from = start.replaceAll("-", ".");
-        // 지난 날짜부터 바꾸면 이미 지난 근무 기록·주휴수당까지 바뀌므로 저장하지 않는다
-        if (start < todayDateString()) {
+        // 근무 시간을 바꿨는데 지난 날짜부터면 이미 지난 근무 기록·주휴수당까지 바뀌므로 저장하지 않는다
+        // (기간 글자만 바꾸는 건 기록에 영향이 없어 지난 날짜여도 저장)
+        if (start < todayDateString() && Object.keys(schedWork().weekly).length) {
           window.alert(`근무표 시작 날짜(${from})가 오늘보다 이전이에요. 제목의 기간을 오늘(${todayDateString().replaceAll("-", ".")}) 이후 날짜로 바꾼 뒤 저장해주세요.`);
           return;
         }
