@@ -103,6 +103,9 @@ const INITIAL_SCHEDULE = [
   ["백인서", { 3: "18:00~22:30" }],
 ];
 
+// 직원 목록 순서 (사장님이 정한 순서, 2026-10-20). 근무표 칸 배치는 위 INITIAL_SCHEDULE 순서 그대로.
+const LIST_ORDER = ["매니저", "최수빈", "백인서", "백인환", "정현욱", "이시헌", "손민영", "최광효", "배예빈", "김예린"];
+
 // 근무표에서 쓰는 사람별 색 (사진의 근무표 색)
 const INITIAL_COLORS = {
   배예빈: "#fff2cc",
@@ -141,7 +144,7 @@ function ensureColors(data = store) {
 
 // 매니저는 근무표에만 나오고 출근·급여에서는 빠진다
 const MANAGER_SCHEDULE = { 1: "10:00~18:00", 2: "10:00~18:00", 5: "10:00~18:00", 6: "08:00~16:00", 0: "08:00~16:00" };
-const INITIAL_SCHEDULE_META = { period: "2026. 10. 5 ~ 11. 8", notes: { 1: "24", 2: "23", 3: "26", 4: "27", 5: "27", 6: "34", 0: "32" } };
+const INITIAL_SCHEDULE_META = { period: "2026.10.05 ~", notes: {} };
 
 const toWeekly = (days) => Object.fromEntries(Object.entries(days).map(([wd, range]) => [wd, parseRange(range)]));
 const isManager = (e) => e.role === "manager";
@@ -161,7 +164,11 @@ function initialData() {
     weekly: toWeekly(days),
   }));
   employees.push(managerEmployee());
-  const data = { employees, records: [], shifts: {}, filledFrom: FILL_FROM, scheduleMeta: structuredClone(INITIAL_SCHEDULE_META) };
+  // 이 기기에 저장된 데이터가 없을 때 처음 보이는 데이터도 지금 직원 순서로 (근무표 칸 배치는 그대로)
+  const scheduleMeta = { ...structuredClone(INITIAL_SCHEDULE_META), order: employees.map((e) => e.id) };
+  const rank = (e) => (LIST_ORDER.includes(e.name) ? LIST_ORDER.indexOf(e.name) : LIST_ORDER.length);
+  employees.sort((a, b) => rank(a) - rank(b));
+  const data = { employees, records: [], shifts: {}, filledFrom: FILL_FROM, scheduleMeta, orderSet: true };
   fillSchedule(data, FILL_FROM, todayDateString());
   return data;
 }
@@ -2852,22 +2859,10 @@ const homeHash = () => (ADMIN_SITE ? "#/calendar" : "#/");
 // 다시 그릴 때 입력 중이던 시간 칸 값을 지키는 칸들 (편집이 끝나면 칸이 사라지므로 그대로 남지 않는다)
 const KEEP_FIELDS = ["edit-start", "edit-end", "extra-name", "extra-start", "extra-end"];
 
-var waitedRemote = false;
-var loadWaitTimer = null;
 function render() {
   const kept = KEEP_FIELDS.map((id) => [id, document.getElementById(id)?.value]).filter(([, v]) => v);
   const focusedId = document.activeElement?.id;
   const r = route();
-  // 관리자: 온라인 데이터를 받기 전에는 이 기기에 남아 있던 예전 데이터(예전 직원 순서 등)를 잠깐 보여주지 않는다.
-  // 인터넷이 안 되면 3초 뒤에는 이 기기 데이터로 보여준다.
-  if (r.name !== "lock" && ADMIN_SITE && cloud && !remote.pubLoaded && !waitedRemote) {
-    app.innerHTML = `<p class="loading-note">불러오는 중…</p>`;
-    loadWaitTimer ??= setTimeout(() => {
-      waitedRemote = true;
-      render();
-    }, 3000);
-    return;
-  }
   if (r.name === "lock") app.innerHTML = renderLock();
   else if (r.name === "day") app.innerHTML = renderDayPage(r.date);
   else if (r.name === "calendar") app.innerHTML = renderAdminCalendar();
@@ -3798,7 +3793,6 @@ function freezeScheduleOrder() {
 }
 
 // 사장님이 정한 직원 목록 순서로 한 번 맞춘다 (2026-10-20 요청, 관리자 로그인 시 한 번)
-const LIST_ORDER = ["매니저", "최수빈", "백인서", "백인환", "정현욱", "이시헌", "손민영", "최광효", "배예빈", "김예린"];
 var listOrderDone = false; // 저장 직후 아직 옛 private 데이터로 다시 그려질 때 또 돌지 않게
 function applyListOrderOnce() {
   if (listOrderDone || !isAdmin() || !remote.privLoaded || Array.isArray(store.scheduleMeta?.order)) return;

@@ -4517,13 +4517,6 @@ td.name {
   width: 118px;
 }
 
-.loading-note {
-  margin: 120px 0;
-  text-align: center;
-  color: var(--ink-sub);
-  font-size: 15px;
-}
-
 /* 카톡 복사 후 다음 직원으로 넘어갈 때 */
 #r-emp.next-flash {
   animation: next-ring 1.2s ease-out calc(0ms - var(--flash-t, 0ms)) both;
