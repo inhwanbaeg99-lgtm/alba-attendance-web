@@ -1067,7 +1067,7 @@ function renderScheduleMobile() {
     ${mHead("근무표", `<div class="m-help">${schedHelp()}</div>`)}
     <label class="m-period">
       <span>기간</span>
-      <input class="sc-period" value="${esc(meta.period ?? "")}" data-meta="period" inputmode="numeric" placeholder="2026.06.04 ~ 2026.07.05" aria-label="기간" />
+      <input class="sc-period" value="${esc(normalizePeriod(meta.period ?? ""))}" data-meta="period" inputmode="numeric" placeholder="2026.06.04 ~" aria-label="기간" />
     </label>
     <div class="m-days" role="tablist">
       ${[1, 2, 3, 4, 5, 6, 0]
@@ -2610,10 +2610,10 @@ function renderScheduleSheet({ wide = false } = {}) {
   return `
     <div class="sched-sheet" id="sched-sheet">
       <div class="sc-print-head">
-        <span class="ps-brand">${esc(storeName())} 근무표${meta.period ? `<span class="sc-print-period">${esc(meta.period.trim())}</span>` : ""}</span>
+        <span class="ps-brand">${esc(storeName())} 근무표${meta.period ? `<span class="sc-print-period">${esc(normalizePeriod(meta.period.trim()))}</span>` : ""}</span>
       </div>
       <div class="sc-head">
-        <h2 class="sc-title">[${esc(storeName())} 근무표]( <input class="sc-period" value="${esc(meta.period ?? "")}" size="${Math.max(6, [...(meta.period || "2026.06.04 ~ 2026.07.05")].length)}" data-meta="period" inputmode="numeric" placeholder="2026.06.04 ~ 2026.07.05" aria-label="기간" /> )</h2>
+        <h2 class="sc-title">[${esc(storeName())} 근무표]( <input class="sc-period" value="${esc(normalizePeriod(meta.period ?? ""))}" size="${Math.max(6, [...(normalizePeriod(meta.period ?? "") || "2026.06.04 ~")].length)}" data-meta="period" inputmode="numeric" placeholder="2026.06.04 ~" aria-label="기간" /> )</h2>
         ${compact ? "" : actions}
       </div>
       ${compact ? `<div class="sc-help" data-html2canvas-ignore>${schedHelp()}</div>` : ""}
@@ -3529,25 +3529,18 @@ window.matchMedia("(min-width: 768px)").addEventListener("change", (mq) => {
 
 render();
 
-// 근무표 기간: 숫자만 입력해도 "2026.06.04 ~ 2026.07.05" 꼴로 맞춘다
+// 근무표 기간: 시작일만 받는다. 숫자만 입력해도 "2026.06.04 ~" 꼴로 맞춘다 (끝나는 날 없이 이날부터 계속)
 function formatPeriod(digits) {
-  const d = digits.slice(0, 16);
+  const d = digits.slice(0, 8);
   const date = (s) => [s.slice(0, 4), s.slice(4, 6), s.slice(6, 8)].filter(Boolean).join(".");
-  if (d.length < 8) return date(d);
-  return d.length === 8 ? `${date(d)} ~ ` : `${date(d.slice(0, 8))} ~ ${date(d.slice(8))}`;
+  return d.length === 8 ? `${date(d)} ~` : date(d);
 }
 
-// 예전 형식("2026. 10. 5 ~ 11. 8")은 고치기 시작할 때 새 형식("2026.10.05 ~ 2026.11.08")으로 바꿔 둔다
+// 예전 형식("2026. 10. 5 ~ 11. 8", "2026.10.05 ~ 2026.11.08")은 고치기 시작할 때 시작일만 남긴다 ("2026.10.05 ~")
 function normalizePeriod(text) {
-  const [a, b] = text.split("~");
-  if (!/\d/.test(a ?? "") || /^\d{4}\.\d{2}\.\d{2}( ~ (\d{4}\.\d{2}\.\d{2})?)?$/.test(text)) return text;
-  const start = scheduleStart(a);
-  const m = b?.match(/(?:(\d{4})\s*[.\-/년]\s*)?(\d{1,2})\s*[.\-/월]\s*(\d{1,2})/);
-  if (!m) return `${start.replaceAll("-", ".")} ~ `;
-  const md = `${m[2].padStart(2, "0")}.${m[3].padStart(2, "0")}`;
-  // 끝 날짜에 연도가 없으면 시작일과 같은 해, 시작보다 앞이면 다음 해
-  const year = m[1] ?? String(Number(start.slice(0, 4)) + (md < start.slice(5).replace("-", ".") ? 1 : 0));
-  return `${start.replaceAll("-", ".")} ~ ${year}.${md}`;
+  const [a] = text.split("~");
+  if (!/\d/.test(a ?? "") || /^\d{4}\.\d{2}\.\d{2} ~$/.test(text)) return text;
+  return `${scheduleStart(a).replaceAll("-", ".")} ~`;
 }
 
 function livePeriod(input, e) {
