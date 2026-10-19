@@ -4505,3 +4505,14 @@ td.name {
 .tsc-dot.under {
   background: #f04452;
 }
+
+/* 휴대폰에서 카톡으로 보낼 근무표: 화면 밖에 PC 크기로 그린다 */
+.sc-wide-stage {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  width: 1100px;
+}
+.sc-wide-stage thead th:first-child {
+  width: 118px;
+}

@@ -2554,10 +2554,11 @@ function scheduleLayout() {
   return { days, rows };
 }
 
-function renderScheduleSheet() {
+// wide: 휴대폰에서도 PC처럼 이름이 들어간 큰 표로 (카톡 사진용)
+function renderScheduleSheet({ wide = false } = {}) {
   const { days, rows } = scheduleLayout();
   const meta = schedMeta();
-  const compact = !isDesktop();
+  const compact = !wide && !isDesktop();
   const occupant = (col, row) => col.find((p) => p.start <= row.start && p.end >= row.end);
   // 같은 정시(예: 22:00~22:30, 22:30~23:00)에 속한 행들은 같은 사람이면 한 칸으로 합친다
   const hourOf = (row) => Math.floor(row.start / 60);
@@ -2792,7 +2793,14 @@ async function scheduleShare(button) {
   return withBusy(button, "사진 만드는 중…", async () => {
     const html2canvas = await loadLib("html2canvas");
     await document.fonts.ready;
-    const sheet = document.getElementById("sched-sheet");
+    // 휴대폰 화면의 표는 이름 없이 색만 있으므로, 화면 밖에 PC용 큰 표를 그려서 찍는다
+    const stage = isDesktop() ? null : document.createElement("div");
+    if (stage) {
+      stage.className = "sc-wide-stage";
+      stage.innerHTML = renderScheduleSheet({ wide: true }).replace('id="sched-sheet"', "");
+      document.body.appendChild(stage);
+    }
+    const sheet = stage ? stage.firstElementChild : document.getElementById("sched-sheet");
     const fold = sheet.closest("details");
     const wasOpen = fold?.open;
     if (fold) fold.open = true;
@@ -2810,6 +2818,7 @@ async function scheduleShare(button) {
       periodText.replaceWith(period);
       sheet.classList.remove("capturing");
       if (fold) fold.open = wasOpen;
+      stage?.remove();
     }
     if (!blob) throw new Error("사진을 만들지 못했어요. 다시 시도해주세요.");
     openSharePreview(new File([blob], `근무표_${(store.scheduleMeta?.period || todayDateString()).replace(/[\s.~]+/g, "_")}.png`, { type: "image/png" }));
