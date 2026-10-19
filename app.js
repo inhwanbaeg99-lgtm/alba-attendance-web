@@ -452,6 +452,8 @@ const ADMIN_SITE = document.body.dataset.site === "admin";
 const isDesktop = () => window.matchMedia("(min-width: 768px)").matches;
 
 // ---------- 아이콘 ----------
+const ICON_EYE = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>`;
+const ICON_EYE_OFF = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 5.1A10.4 10.4 0 0 1 12 5c6.4 0 10 7 10 7a17.6 17.6 0 0 1-3.2 4.1M6.6 6.6C3.8 8.4 2 12 2 12s3.6 7 10 7c1.9 0 3.6-.6 5-1.5"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>`;
 
 const svg = (size, d, stroke = 2.25) =>
   `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
@@ -558,7 +560,10 @@ function renderLock() {
       ${title}
       <form class="lock-form" id="login-form">
         <input id="login-email" class="field" type="email" autocomplete="username" placeholder="이메일" aria-label="이메일" required />
-        <input id="login-password" class="field" type="password" autocomplete="current-password" placeholder="비밀번호" aria-label="비밀번호" required />
+        <div class="pw-wrap">
+          <input id="login-password" class="field" type="password" autocomplete="current-password" placeholder="비밀번호" aria-label="비밀번호" required />
+          <button type="button" class="pw-eye" data-action="toggle-password" aria-label="비밀번호 보기" aria-pressed="false">${ICON_EYE}</button>
+        </div>
         <button type="submit" class="btn-primary"${state.loggingIn ? " disabled" : ""}>${state.loggingIn ? "로그인 중…" : "로그인"}</button>
         ${errorLine()}
         ${state.notice ? `<p class="lock-note ok">${esc(state.notice)}</p>` : ""}
@@ -3183,6 +3188,17 @@ app.addEventListener("click", (e) => {
       if (row && !reducedMotion()) {
         row.animate([{ opacity: 1, transform: "none" }, { opacity: 0, transform: "translateX(24px)" }], { duration: 220, easing: "ease-in" }).finished.then(finish);
       } else finish();
+      return;
+    }
+    case "toggle-password": {
+      // 다시 그리지 않고 입력칸 종류만 바꾼다 (입력한 비밀번호가 지워지지 않게)
+      const input = document.getElementById("login-password");
+      const show = input.type === "password";
+      input.type = show ? "text" : "password";
+      el.innerHTML = show ? ICON_EYE_OFF : ICON_EYE;
+      el.setAttribute("aria-pressed", String(show));
+      el.setAttribute("aria-label", show ? "비밀번호 숨기기" : "비밀번호 보기");
+      input.focus({ preventScroll: true });
       return;
     }
     case "fill-template-xlsx":

@@ -4565,3 +4565,32 @@ td.name {
     animation: none !important;
   }
 }
+
+/* 로그인: 비밀번호 보기 */
+.pw-wrap {
+  position: relative;
+}
+.pw-wrap .field {
+  width: 100%;
+  padding-right: 48px;
+}
+.pw-eye {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--ink-sub);
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+.pw-eye:hover,
+.pw-eye[aria-pressed="true"] {
+  color: var(--accent);
+}
