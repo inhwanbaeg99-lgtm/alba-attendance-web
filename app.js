@@ -836,7 +836,7 @@ function renderEmployees() {
     .map(
       (e, i) => `
       <tr style="--i:${i}">
-        <td class="name"><span class="name-cell"><span class="swatch" style="background:${cssColor(e.color)}" title="근무표 색 (자동)"></span>${nameLabel(e)}</span><div class="muted small">${esc(e.phone ? formatPhone(e.phone) : "")}</div></td>
+        <td class="name"><span class="name-cell"><span class="move-btns"><button type="button" class="move-btn" data-action="move-emp" data-id="${e.id}" data-dir="-1" aria-label="${esc(e.name)} 위로"${i === 0 ? " disabled" : ""}>▲</button><button type="button" class="move-btn" data-action="move-emp" data-id="${e.id}" data-dir="1" aria-label="${esc(e.name)} 아래로"${i === store.employees.length - 1 ? " disabled" : ""}>▼</button></span><span class="swatch" style="background:${cssColor(e.color)}" title="근무표 색 (자동)"></span>${nameLabel(e)}</span><div class="muted small">${esc(e.phone ? formatPhone(e.phone) : "")}</div></td>
         ${order
           .map(
             (wd) =>
@@ -1001,6 +1001,10 @@ function renderEmpSheet(e) {
     </div>
     <label class="sheet-label" for="m-wage">시급</label>
     <div class="m-wage"><input id="m-wage" class="field money" type="text" inputmode="numeric" value="${formatMoney(e.hourlyWage)}" data-wage="${e.id}" aria-label="${esc(e.name)} 시급" /><span>원</span></div>
+    <div class="m-toggles">
+      <button type="button" class="m-toggle" data-action="move-emp" data-id="${e.id}" data-dir="-1"${store.employees[0]?.id === e.id ? " disabled" : ""}>▲ 위로</button>
+      <button type="button" class="m-toggle" data-action="move-emp" data-id="${e.id}" data-dir="1"${store.employees.at(-1)?.id === e.id ? " disabled" : ""}>▼ 아래로</button>
+    </div>
     <div class="m-toggles">
       <button type="button" class="m-toggle${e.active ? " on" : ""}" data-action="toggle-active" data-id="${e.id}">${e.active ? "재직중" : "비활성"}</button>
       ${
@@ -2521,7 +2525,7 @@ function tempSaveSchedule() {
 
 function commitSchedule() {
   const work = schedWork();
-  if (work.meta) store.scheduleMeta = work.meta; // 기간이 바뀌면 적용 시작일도 바뀌므로 먼저
+  if (work.meta) store.scheduleMeta = { ...work.meta, order: store.scheduleMeta?.order ?? work.meta.order }; // 기간이 바뀌면 적용 시작일도 바뀌므로 먼저
   pinPeriodYear();
   for (const [empId, days] of Object.entries(work.weekly)) {
     const emp = employeeById(empId);
@@ -2534,7 +2538,9 @@ function commitSchedule() {
 }
 
 function scheduleLayout() {
-  const order = new Map(store.employees.map((e, i) => [e.id, i]));
+  // 같은 시간에 시작하는 사람의 칸 순서. 직원 목록 순서를 바꿔도 근무표 배치는 그대로 두려고 따로 기억한다
+  const ids = [...(Array.isArray(store.scheduleMeta?.order) ? store.scheduleMeta.order : []), ...store.employees.map((e) => e.id)];
+  const order = new Map([...new Set(ids)].map((id, i) => [id, i]));
   const days = SCHEDULE_DAYS.map((wd) => {
     const people = store.employees
       .map((e) => ({ e, w: effWeekly(e)[wd] }))
@@ -3141,6 +3147,15 @@ app.addEventListener("click", (e) => {
       emp.active = !emp.active;
       save();
       queueToast(`${emp.name}님을 ${emp.active ? "재직중으로" : "비활성으로"} 바꿨어요`);
+      break;
+    }
+    case "move-emp": {
+      const i = store.employees.findIndex((x) => x.id === id);
+      const j = i + Number(el.dataset.dir);
+      if (i < 0 || j < 0 || j >= store.employees.length) return;
+      freezeScheduleOrder();
+      [store.employees[i], store.employees[j]] = [store.employees[j], store.employees[i]];
+      save();
       break;
     }
     case "remove-employee": {
@@ -3765,6 +3780,24 @@ function pushChanges() {
   else for (const [k, v] of Object.entries(updates)) cloud.db.ref(k).set(v).catch(fail);
 }
 
+// 직원 목록 순서를 바꾸기 전에 지금 근무표 칸 배치 순서를 기억해 둔다 (한 번만)
+function freezeScheduleOrder() {
+  if (Array.isArray(store.scheduleMeta?.order)) return;
+  store.scheduleMeta = { ...store.scheduleMeta, order: store.employees.map((e) => e.id) };
+}
+
+// 사장님이 정한 직원 목록 순서로 한 번 맞춘다 (2026-10-20 요청, 관리자 로그인 시 한 번)
+const LIST_ORDER = ["매니저", "최수빈", "백인서", "백인환", "정현욱", "이시헌", "손민영", "최광효", "배예빈", "김예린"];
+var listOrderDone = false; // 저장 직후 아직 옛 private 데이터로 다시 그려질 때 또 돌지 않게
+function applyListOrderOnce() {
+  if (listOrderDone || !isAdmin() || !remote.privLoaded || Array.isArray(store.scheduleMeta?.order)) return;
+  listOrderDone = true;
+  freezeScheduleOrder();
+  const rank = (e) => (LIST_ORDER.includes(e.name) ? LIST_ORDER.indexOf(e.name) : LIST_ORDER.length);
+  store.employees = store.employees.map((e, i) => [e, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(([e]) => e);
+  save();
+}
+
 function applyRemote() {
   remote.last = flattenRemote();
   if (!remoteHasData()) {
@@ -3772,6 +3805,7 @@ function applyRemote() {
     return;
   }
   store = storeFromRemote();
+  applyListOrderOnce();
   saveCache();
   requestRender();
 }
