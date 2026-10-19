@@ -2596,9 +2596,6 @@ function renderScheduleSheet({ wide = false } = {}) {
   const head = days
     .map((d) => `<th colspan="${d.cols.length}" class="${d.wd === 0 || d.wd === 6 ? "sc-rest" : ""}">${WEEKDAYS[d.wd]}</th>`)
     .join("");
-  const notes = days
-    .map((d) => `<td colspan="${d.cols.length}" class="sc-note"><input value="${esc(meta.notes?.[d.wd] ?? "")}" data-note="${d.wd}" aria-label="${WEEKDAYS[d.wd]}요일 비고" /></td>`)
-    .join("");
   // 휴대폰에서는 표·색 안내 아래에
   const actions = `
         <div class="sc-actions" data-html2canvas-ignore>
@@ -2621,7 +2618,6 @@ function renderScheduleSheet({ wide = false } = {}) {
         <thead><tr><th>시간</th>${head}</tr></thead>
         <tbody>
           ${body}
-          <tr class="sc-foot"><td>비고</td>${notes}</tr>
         </tbody>
       </table>
       ${compact ? renderSchedLegend(days) + actions : ""}
@@ -2634,7 +2630,7 @@ function schedHelp() {
     "schedule",
     `${isDesktop() ? "이름 칸을 누르면 시간 수정·삭제, 회색 빈 칸을 누르면 근무자 추가예요. 옆에서 입력하면 표에 바로 보여요." : "색 칸을 누르면 시간 수정·삭제, 회색 빈 칸을 누르면 근무자 추가예요. 아래에서 입력하면 표에 바로 보여요."}<br />
     <b>저장</b>하면 직원 관리·달력·근무 기록에 반영되고, <b>임시저장</b>은 반영하지 않고 고친 내용만 보관해요.<br />
-    지난 근무 기록은 제목 기간의 시작일(<b>${shortDate(scheduleStart())}</b>)부터 바뀌어요. 제목의 기간과 비고 칸도 눌러서 고칠 수 있어요.`,
+    지난 근무 기록은 제목 기간의 시작일(<b>${shortDate(scheduleStart())}</b>)부터 바뀌어요. 제목의 기간도 눌러서 고칠 수 있어요.`,
   );
 }
 
