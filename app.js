@@ -2401,12 +2401,21 @@ async function shareTimesheetImage(button, empId) {
       stage.remove();
     }
     if (!blob) throw new Error("사진을 만들지 못했어요. 다시 시도해주세요.");
-    openSharePreview(new File([blob], `${emp.name} ${Number(month.slice(5, 7))}월 근무.png`, { type: "image/png" }));
+    openSharePreview(new File([blob], `${emp.name} ${Number(month.slice(5, 7))}월 근무.png`, { type: "image/png" }), () => {
+      // PC: 복사하면 직원 칸을 다음 직원으로 넘긴다 (한 명씩 이어서 보내기 쉽게)
+      const list = store.employees.filter((e) => !isManager(e));
+      const next = list[list.findIndex((e) => e.id === empId) + 1];
+      if (!next || state.payroll.employeeId !== empId) return "복사했어요. 카톡 채팅방에 붙여넣기 하세요";
+      state.payroll.employeeId = next.id;
+      render();
+      return `복사했어요. 다음 직원 ${next.name}(으)로 넘어갔어요`;
+    });
   });
 }
 
 // 미리보기 창: 사진을 확인하고 보내기 (공유·복사는 버튼을 누른 순간에 해야 브라우저가 허락한다)
-function openSharePreview(file) {
+// onCopied: 복사한 뒤 할 일 (돌려준 글자를 알림으로 띄운다)
+function openSharePreview(file, onCopied) {
   const url = URL.createObjectURL(file);
   const canShare = !isDesktop() && navigator.canShare?.({ files: [file] });
   const canCopy = isDesktop() && window.ClipboardItem && navigator.clipboard?.write;
@@ -2452,7 +2461,7 @@ function openSharePreview(file) {
       try {
         await navigator.clipboard.write([new ClipboardItem({ "image/png": file })]);
         close();
-        showToast("복사했어요. 카톡 채팅방에 붙여넣기 하세요");
+        showToast(onCopied?.() || "복사했어요. 카톡 채팅방에 붙여넣기 하세요");
       } catch {
         window.alert("복사하지 못했어요. 사진 저장 후 카톡에 끌어다 놓아주세요.");
       }
