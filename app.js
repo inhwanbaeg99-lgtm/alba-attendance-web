@@ -3206,7 +3206,13 @@ app.addEventListener("click", (e) => {
       if (state.slotEdit) liveSlot({ final: true });
       {
         // 저장할 근무표(아직 저장 전인 기간 포함)의 시작일
-        const from = scheduleStart(state.schedWork?.meta?.period ?? store.scheduleMeta?.period ?? "").replaceAll("-", ".");
+        const start = scheduleStart(state.schedWork?.meta?.period ?? store.scheduleMeta?.period ?? "");
+        const from = start.replaceAll("-", ".");
+        // 지난 날짜부터 바꾸면 이미 지난 근무 기록·주휴수당까지 바뀌므로 저장하지 않는다
+        if (start < todayDateString()) {
+          window.alert(`근무표 시작 날짜(${from})가 오늘보다 이전이에요. 제목의 기간을 오늘(${todayDateString().replaceAll("-", ".")}) 이후 날짜로 바꾼 뒤 저장해주세요.`);
+          return;
+        }
         if (!window.confirm(`근무표를 저장하면 ${from} 부터 직원 관리·달력·근무 기록에 반영돼요. 저장할까요?`)) return;
       }
       state.slotEdit = null;
