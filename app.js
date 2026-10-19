@@ -1088,7 +1088,7 @@ function renderScheduleMobile() {
     <div class="m-savebar">
       <button type="button" class="btn-ghost" data-action="schedule-temp"${schedDirty() ? "" : " disabled"}>임시저장</button>
       <button type="button" class="btn-primary" data-action="schedule-save"${hasDraft() ? "" : " disabled"}>저장</button>
-      <button type="button" class="btn-ghost" data-action="schedule-pdf">PDF</button>
+      <button type="button" class="btn-ghost" data-action="schedule-share">카톡 전송</button>
     </div>`,
   );
 }
@@ -2603,7 +2603,7 @@ function renderScheduleSheet() {
         <div class="sc-actions" data-html2canvas-ignore>
           <button type="button" class="pill plain-dark" data-action="schedule-temp"${schedDirty() ? "" : " disabled"}>임시저장</button>
           <button type="button" class="pill" data-action="schedule-save"${hasDraft() ? "" : " disabled"}>저장</button>
-          <button type="button" class="pill plain-dark" data-action="schedule-pdf">PDF 저장</button>
+          <button type="button" class="pill plain-dark" data-action="schedule-share">카카오톡 전송하기</button>
         </div>`;
 
   return `
@@ -2787,9 +2787,10 @@ function finishSlot() {
   render();
 }
 
-async function schedulePdf(button) {
-  return withBusy(button, "PDF 만드는 중…", async () => {
-    const [html2canvas, jsPDF] = await Promise.all([loadLib("html2canvas"), loadLib("jspdf")]);
+// 근무표를 사진으로 찍어 카톡으로 보낸다 (휴대폰은 공유창, PC는 복사해서 붙여넣기)
+async function scheduleShare(button) {
+  return withBusy(button, "사진 만드는 중…", async () => {
+    const html2canvas = await loadLib("html2canvas");
     await document.fonts.ready;
     const sheet = document.getElementById("sched-sheet");
     const fold = sheet.closest("details");
@@ -2801,21 +2802,17 @@ async function schedulePdf(button) {
     const periodText = document.createElement("span");
     periodText.textContent = period.value;
     period.replaceWith(periodText);
+    let blob;
     try {
       const canvas = await html2canvas(sheet, { scale: 2, backgroundColor: "#ffffff" });
-      const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "landscape" });
-      const margin = 8;
-      const w = 297 - margin * 2;
-      const h = Math.min(210 - margin * 2, (canvas.height / canvas.width) * w);
-      const fitW = (canvas.width / canvas.height) * h;
-      // A4 가로 한가운데에 (위아래 여백을 똑같이)
-      pdf.addImage(canvas.toDataURL("image/jpeg", 0.95), "JPEG", (297 - fitW) / 2, (210 - h) / 2, fitW, h);
-      pdf.save(`근무표_${(store.scheduleMeta?.period || todayDateString()).replace(/[\s.~]+/g, "_")}.pdf`);
+      blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
     } finally {
       periodText.replaceWith(period);
       sheet.classList.remove("capturing");
       if (fold) fold.open = wasOpen;
     }
+    if (!blob) throw new Error("사진을 만들지 못했어요. 다시 시도해주세요.");
+    openSharePreview(new File([blob], `근무표_${(store.scheduleMeta?.period || todayDateString()).replace(/[\s.~]+/g, "_")}.png`, { type: "image/png" }));
   });
 }
 
@@ -3193,8 +3190,8 @@ app.addEventListener("click", (e) => {
         () => showToast("복사하지 못했어요. 주소를 길게 눌러 복사해주세요."),
       );
       return;
-    case "schedule-pdf":
-      schedulePdf(el);
+    case "schedule-share":
+      scheduleShare(el);
       return;
     case "schedule-temp":
       if (state.slotEdit) liveSlot({ final: true });
