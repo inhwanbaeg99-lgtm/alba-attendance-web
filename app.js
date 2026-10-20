@@ -3595,7 +3595,7 @@ async function addExtra() {
   }
   let emp = store.employees.find((x) => x.active && x.name === name);
   // 처음 보는 이름은 직원이 아니라 교육생 (교육)으로 넣는다. 직원 등록은 관리자가 직원 화면에서.
-  if (!emp && !(await uiConfirm(`'${name}'님은 등록된 직원이 아니에요.\n교육(교육생)으로 등록할까요? 직원 등록은 사장님이 해요.`, { ok: "등록" }))) return;
+  if (!emp && !(await uiConfirm(`'${name}'님은 등록된 직원이 아니에요.\n교육(교육생)으로 등록할까요?\n직원 등록은 사장님이 해요.`, { ok: "등록" }))) return;
   if (!emp) {
     emp = { id: uid(), name, phone: null, hourlyWage: DEFAULT_WAGE, active: true, weekly: {}, trainee: true };
     store.employees.push(emp);
