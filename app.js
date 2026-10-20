@@ -3822,6 +3822,29 @@ function applyListOrderOnce() {
   save();
 }
 
+// 사장님 요청으로 실제 데이터를 한 번만 고친다 (관리자 로그인 시). 한 번 하면 settings.fixes 에 남겨 다시 하지 않는다.
+// - 2026-10-20: 배예빈 목요일 7-12 → 7-15, 오늘부터 적용 (지난 근무 기록·주휴수당은 그대로)
+var fixesDone = false; // 저장 직후 아직 옛 private 데이터로 다시 그려질 때 또 돌지 않게
+function applyFixesOnce() {
+  if (fixesDone || !isAdmin() || !remote.privLoaded) return;
+  const done = store.settings?.fixes ?? [];
+  if (done.includes("bae-thu-0715")) return;
+  fixesDone = true;
+  const emp = store.employees.find((e) => e.name === "배예빈");
+  const thu = emp?.weekly[4];
+  if (thu && thu.start === "07:00" && thu.end === "12:00") {
+    const from = todayDateString();
+    if (!emp.weeklyHistory) {
+      emp.weeklyBase = structuredClone(emp.weekly);
+      emp.weeklyHistory = [];
+    }
+    emp.weekly[4] = { start: "07:00", end: "15:00" };
+    emp.weeklyHistory = [...emp.weeklyHistory.filter((snap) => snap.from < from), { from, weekly: structuredClone(emp.weekly) }];
+  }
+  store.settings = { ...store.settings, fixes: [...done, "bae-thu-0715"] };
+  save();
+}
+
 function applyRemote() {
   remote.last = flattenRemote();
   if (!remoteHasData()) {
@@ -3830,6 +3853,7 @@ function applyRemote() {
   }
   store = storeFromRemote();
   applyListOrderOnce();
+  applyFixesOnce();
   saveCache();
   requestRender();
 }
