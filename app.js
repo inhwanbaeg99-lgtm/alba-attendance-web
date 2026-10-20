@@ -3322,7 +3322,7 @@ app.addEventListener("click", (e) => {
         // 저장할 근무표(아직 저장 전인 기간 포함)의 시작일
         // 근무표를 바꿀 때마다 시작 날짜를 직접 다시 입력해야 저장 (예전 날짜 그대로 실수로 덮어쓰지 않게)
         if (!state.periodTyped) {
-          uiAlert("저장하기 전에 근무표 시작 날짜를 입력해주세요.\n예전과 같은 날짜라도 다시 입력해야 저장돼요.\n(예: 20261020)").then(() => {
+          uiAlert("저장하기 전에 근무표 시작 날짜를 입력해주세요.\n예전과 같은 날짜라도 다시 입력해야 저장돼요.\n(예: 2026.10.20~)").then(() => {
             const input = document.querySelector(".sc-period");
             input?.focus();
             input?.select();
@@ -3338,7 +3338,7 @@ app.addEventListener("click", (e) => {
           return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
         })();
         if (!valid) {
-          uiAlert("근무표 시작 날짜를 입력해주세요.\n제목 옆 기간 칸에 숫자 8자리로 입력하면 돼요.\n(예: 20261020)").then(() =>
+          uiAlert("근무표 시작 날짜를 입력해주세요.\n제목 옆 기간 칸에 숫자 8자리로 입력하면 돼요.\n(예: 2026.10.20~)").then(() =>
             document.querySelector(".sc-period")?.focus(),
           );
           return;
