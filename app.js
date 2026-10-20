@@ -3258,13 +3258,20 @@ app.addEventListener("click", (e) => {
       if (state.slotEdit) liveSlot({ final: true });
       {
         // 저장할 근무표(아직 저장 전인 기간 포함)의 시작일
-        const start = scheduleStart(state.schedWork?.meta?.period ?? store.scheduleMeta?.period ?? "");
-        const from = start.replaceAll("-", ".");
-        // 지난 날짜부터 바꾸면 이미 지난 근무 기록·주휴수당까지 바뀌므로 저장하지 않는다
-        if (start < todayDateString()) {
-          window.alert(`근무표 시작 날짜(${from})가 오늘보다 이전이에요. 제목의 기간을 오늘(${todayDateString().replaceAll("-", ".")}) 이후 날짜로 바꾼 뒤 저장해주세요.`);
+        const period = state.schedWork?.meta?.period ?? store.scheduleMeta?.period ?? "";
+        // 시작 날짜(연·월·일)를 다 입력해야 저장 (날짜가 없으면 언제부터 바뀌는지 알 수 없다)
+        const typed = period.match(/(\d{4})\s*[.\-/년]\s*(\d{1,2})\s*[.\-/월]\s*(\d{1,2})/);
+        const valid = typed && (() => {
+          const [y, m, d] = typed.slice(1).map(Number);
+          const dt = new Date(Date.UTC(y, m - 1, d));
+          return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+        })();
+        if (!valid) {
+          window.alert("근무표 시작 날짜를 입력해주세요. 제목 옆 기간 칸에 숫자 8자리로 입력하면 돼요. (예: 20261020)");
+          document.querySelector(".sc-period")?.focus();
           return;
         }
+        const from = scheduleStart(period).replaceAll("-", ".");
         if (!window.confirm(`근무표를 저장하면 ${from} 부터 직원 관리·달력·근무 기록에 반영돼요. 저장할까요?`)) return;
       }
       state.slotEdit = null;
