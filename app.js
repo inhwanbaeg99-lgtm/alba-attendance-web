@@ -1619,6 +1619,60 @@ function loadLib(name) {
   });
 }
 
+// ---------- 안내 · 확인 창 (브라우저 기본 alert / confirm 대신 앱 디자인으로) ----------
+// uiAlert(문구) → 확인만, uiConfirm(문구, { ok, danger }) → 확인이면 true
+function uiDialog({ message, ok = "확인", cancel = null, danger = false }) {
+  return new Promise((resolve) => {
+    const prev = document.activeElement;
+    const back = document.createElement("div");
+    back.className = "ui-back";
+    back.innerHTML = `
+      <div class="ui-box" role="alertdialog" aria-modal="true" aria-describedby="ui-msg">
+        <p class="ui-msg" id="ui-msg"></p>
+        <div class="ui-actions">
+          ${cancel ? `<button type="button" class="ui-btn ui-no" data-ui="no">${esc(cancel)}</button>` : ""}
+          <button type="button" class="ui-btn ui-yes${danger ? " danger" : ""}" data-ui="yes">${esc(ok)}</button>
+        </div>
+      </div>`;
+    back.querySelector(".ui-msg").textContent = message;
+    const buttons = [...back.querySelectorAll("button")];
+    let closed = false;
+    const close = (value) => {
+      if (closed) return;
+      closed = true;
+      document.removeEventListener("keydown", onKey, true);
+      back.classList.add("leave");
+      setTimeout(() => back.remove(), reducedMotion() ? 0 : 160);
+      if (prev && document.contains(prev)) prev.focus({ preventScroll: true });
+      resolve(value);
+    };
+    // Esc = 취소, Enter = 지금 선택된 버튼 (처음엔 확인), Tab 은 창 안에서만
+    const onKey = (e) => {
+      if (e.key === "Escape") close(false);
+      else if (e.key === "Enter") close(document.activeElement?.dataset.ui !== "no");
+      else if (e.key === "Tab") {
+        const i = buttons.indexOf(document.activeElement);
+        buttons[(i + (e.shiftKey ? -1 : 1) + buttons.length) % buttons.length].focus();
+      } else return;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    back.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-ui]");
+      if (b) close(b.dataset.ui === "yes");
+      else if (e.target === back) close(!cancel); // 바깥을 누르면: 확인 창은 취소, 안내 창은 닫기
+    });
+    document.body.appendChild(back);
+    // 창을 연 키 입력(Enter 등)이 바로 창을 닫지 않게 다음 순간부터 키를 받는다
+    setTimeout(() => {
+      document.addEventListener("keydown", onKey, true);
+      back.querySelector(".ui-yes").focus({ preventScroll: true });
+    });
+  });
+}
+const uiAlert = (message) => uiDialog({ message });
+const uiConfirm = (message, options = {}) => uiDialog({ message, cancel: "취소", ...options });
+
 async function withBusy(button, text, task) {
   const label = button.textContent;
   button.disabled = true;
@@ -1626,7 +1680,7 @@ async function withBusy(button, text, task) {
   try {
     await task();
   } catch (err) {
-    window.alert(err.message);
+    uiAlert(err.message);
   } finally {
     button.disabled = false;
     button.textContent = label;
@@ -2321,7 +2375,7 @@ function fillTemplateXlsx(button) {
     assertWorkbookIntact(fflate, zip);
     const saved = await saveXlsxBytes(fflate.zipSync(zip, { level: 6 }), `메가커피 ${Number(month.slice(5, 7))}월 근무.xlsx`);
     if (!saved) return;
-    if (notFound.length) window.alert(`저장했어요. 다만 "${notFound.join(", ")}" 이름은 기본양식에 줄이 없어서 빠졌어요. 기본양식에 그 직원 줄을 추가해주세요.`);
+    if (notFound.length) uiAlert(`저장했어요. 다만 "${notFound.join(", ")}" 이름은 기본양식에 줄이 없어서 빠졌어요. 기본양식에 그 직원 줄을 추가해주세요.`);
     showToast("기본양식에 채워서 저장했어요");
   });
 }
@@ -2471,7 +2525,7 @@ function openSharePreview(file, onCopied) {
         await navigator.share({ files: [file] });
         close();
       } catch (err) {
-        if (err.name !== "AbortError") window.alert("공유를 열지 못했어요. 사진 저장 후 카톡에서 보내주세요.");
+        if (err.name !== "AbortError") uiAlert("공유를 열지 못했어요. 사진 저장 후 카톡에서 보내주세요.");
       }
     }
     if (kind === "copy") {
@@ -2480,7 +2534,7 @@ function openSharePreview(file, onCopied) {
         close();
         showToast(onCopied?.() || "복사했어요. 카톡 채팅방에 붙여넣기 하세요");
       } catch {
-        window.alert("복사하지 못했어요. 사진 저장 후 카톡에 끌어다 놓아주세요.");
+        uiAlert("복사하지 못했어요. 사진 저장 후 카톡에 끌어다 놓아주세요.");
       }
     }
   });
@@ -3124,11 +3178,14 @@ app.addEventListener("click", (e) => {
       break;
     case "promote-trainee": {
       const emp = employeeById(id);
-      if (!window.confirm(`${emp.name}님을 직원으로 등록할까요?\n지금까지 교육으로 일한 날은 계속 교육수당으로 계산돼요.`)) return;
-      delete emp.trainee;
-      save();
-      queueToast(`${emp.name}님을 직원으로 등록했어요`);
-      break;
+      uiConfirm(`${emp.name}님을 직원으로 등록할까요?\n지금까지 교육으로 일한 날은 계속 교육수당으로 계산돼요.`, { ok: "등록" }).then((yes) => {
+        if (!yes) return;
+        delete emp.trainee;
+        save();
+        queueToast(`${emp.name}님을 직원으로 등록했어요`);
+        render();
+      });
+      return;
     }
     case "admin-clock-in": {
       // 관리자: 출근을 못 찍은 직원을 그날 근무 시간대로 출근 처리 (오늘·지난 날짜)
@@ -3154,12 +3211,15 @@ app.addEventListener("click", (e) => {
       break;
     case "remove-record": {
       const date = activeDate();
-      if (!window.confirm(`${employeeById(id).name}님의 ${shortDate(date)} 근무 기록을 삭제할까요?`)) return;
-      removeRecord(id, date);
-      save();
-      queueToast("근무 기록을 삭제했어요");
-      state.expandedId = null;
-      break;
+      uiConfirm(`${employeeById(id).name}님의 ${shortDate(date)} 근무 기록을 삭제할까요?`, { ok: "삭제", danger: true }).then((yes) => {
+        if (!yes) return;
+        removeRecord(id, date);
+        save();
+        queueToast("근무 기록을 삭제했어요");
+        state.expandedId = null;
+        render();
+      });
+      return;
     }
     case "logout":
       cloud?.auth.signOut();
@@ -3174,20 +3234,22 @@ app.addEventListener("click", (e) => {
     }
     case "remove-employee": {
       const emp = employeeById(id);
-      if (!window.confirm(`${emp.name}님을 삭제하시겠습니까? 근무 기록도 함께 삭제됩니다.`)) return;
-      const finish = () => {
-        store.employees = store.employees.filter((x) => x.id !== id);
-        store.records = store.records.filter((x) => x.employeeId !== id);
-        save();
-        queueToast(`${emp.name}님을 삭제했어요`);
-        if (state.sheet?.id === id) state.sheet = null;
-        render();
-      };
-      // 줄이 옆으로 밀려나며 사라진 뒤에 지운다
       const row = el.closest("tr");
-      if (row && !reducedMotion()) {
-        row.animate([{ opacity: 1, transform: "none" }, { opacity: 0, transform: "translateX(24px)" }], { duration: 220, easing: "ease-in" }).finished.then(finish);
-      } else finish();
+      uiConfirm(`${emp.name}님을 삭제할까요?\n근무 기록도 함께 삭제돼요.`, { ok: "삭제", danger: true }).then((yes) => {
+        if (!yes) return;
+        const finish = () => {
+          store.employees = store.employees.filter((x) => x.id !== id);
+          store.records = store.records.filter((x) => x.employeeId !== id);
+          save();
+          queueToast(`${emp.name}님을 삭제했어요`);
+          if (state.sheet?.id === id) state.sheet = null;
+          render();
+        };
+        // 줄이 옆으로 밀려나며 사라진 뒤에 지운다
+        if (row && row.isConnected && !reducedMotion()) {
+          row.animate([{ opacity: 1, transform: "none" }, { opacity: 0, transform: "translateX(24px)" }], { duration: 220, easing: "ease-in" }).finished.then(finish);
+        } else finish();
+      });
       return;
     }
     case "toggle-password": {
@@ -3260,10 +3322,11 @@ app.addEventListener("click", (e) => {
         // 저장할 근무표(아직 저장 전인 기간 포함)의 시작일
         // 근무표를 바꿀 때마다 시작 날짜를 직접 다시 입력해야 저장 (예전 날짜 그대로 실수로 덮어쓰지 않게)
         if (!state.periodTyped) {
-          window.alert("저장하기 전에 근무표 시작 날짜를 입력해주세요. 예전과 같은 날짜라도 다시 입력해야 저장돼요. (예: 20261020)");
-          const input = document.querySelector(".sc-period");
-          input?.focus();
-          input?.select();
+          uiAlert("저장하기 전에 근무표 시작 날짜를 입력해주세요.\n예전과 같은 날짜라도 다시 입력해야 저장돼요. (예: 20261020)").then(() => {
+            const input = document.querySelector(".sc-period");
+            input?.focus();
+            input?.select();
+          });
           return;
         }
         const period = state.schedWork?.meta?.period ?? store.scheduleMeta?.period ?? "";
@@ -3275,17 +3338,20 @@ app.addEventListener("click", (e) => {
           return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
         })();
         if (!valid) {
-          window.alert("근무표 시작 날짜를 입력해주세요. 제목 옆 기간 칸에 숫자 8자리로 입력하면 돼요. (예: 20261020)");
-          document.querySelector(".sc-period")?.focus();
+          uiAlert("근무표 시작 날짜를 입력해주세요.\n제목 옆 기간 칸에 숫자 8자리로 입력하면 돼요. (예: 20261020)").then(() =>
+            document.querySelector(".sc-period")?.focus(),
+          );
           return;
         }
         const from = scheduleStart(period).replaceAll("-", ".");
-        if (!window.confirm(`근무표를 저장하면 ${from} 부터 직원 관리·달력·근무 기록에 반영돼요. 저장할까요?`)) return;
+        uiConfirm(`근무표를 저장하면 ${from} 부터\n직원 관리·달력·근무 기록에 반영돼요. 저장할까요?`, { ok: "저장" }).then((yes) => {
+          if (!yes) return;
+          state.slotEdit = null;
+          state.periodTyped = false;
+          commitSchedule();
+          showToast("근무표를 저장했어요", "ok");
+        });
       }
-      state.slotEdit = null;
-      state.periodTyped = false;
-      commitSchedule();
-      showToast("근무표를 저장했어요", "ok");
       return;
     case "edit-slot":
       if (state.slotEdit) liveSlot({ final: true }); // 보던 칸은 입력한 대로 두고 넘어간다
@@ -3518,7 +3584,7 @@ app.addEventListener("change", (e) => {
 });
 
 // + 로 일정에 없던 인원을 그날 근무자로 등록. 처음 보는 이름이면 직원으로도 추가된다.
-function addExtra() {
+async function addExtra() {
   const name = document.getElementById("extra-name").value.trim();
   const start = readTime("extra-start");
   const end = readTime("extra-end");
@@ -3529,7 +3595,7 @@ function addExtra() {
   }
   let emp = store.employees.find((x) => x.active && x.name === name);
   // 처음 보는 이름은 직원이 아니라 교육생 (교육)으로 넣는다. 직원 등록은 관리자가 직원 화면에서.
-  if (!emp && !window.confirm(`'${name}'님은 등록된 직원이 아니에요. 교육(교육생)으로 등록할까요?\n직원 등록은 사장님이 해요.`)) return;
+  if (!emp && !(await uiConfirm(`'${name}'님은 등록된 직원이 아니에요.\n교육(교육생)으로 등록할까요? 직원 등록은 사장님이 해요.`, { ok: "등록" }))) return;
   if (!emp) {
     emp = { id: uid(), name, phone: null, hourlyWage: DEFAULT_WAGE, active: true, weekly: {}, trainee: true };
     store.employees.push(emp);
@@ -3898,12 +3964,16 @@ function maybeSeed() {
   if (!isAdmin() || !remote.pubLoaded || !remote.privLoaded || remoteHasData() || remote.seedAsked) return;
   remote.seedAsked = true;
   const n = store.records.length;
-  if (!window.confirm(`온라인 저장소가 비어 있어요.\n이 컴퓨터에 있는 직원 ${store.employees.length}명, 근무 기록 ${n}건을 올릴까요?\n(매장 데스크 컴퓨터에서 해주세요)`)) return;
+  uiConfirm(`온라인 저장소가 비어 있어요.\n이 컴퓨터에 있는 직원 ${store.employees.length}명, 근무 기록 ${n}건을 올릴까요?\n(매장 데스크 컴퓨터에서 해주세요)`, { ok: "올리기" }).then((yes) => {
+    if (yes) uploadAll();
+  });
+}
+function uploadAll() {
   const all = flattenStore(true);
   remote.last = { ...all };
   cloud.db.ref().update(all).catch((err) => {
     remote.seedAsked = false;
-    window.alert("올리지 못했어요. 인터넷 연결과 Firebase 규칙을 확인해주세요.");
+    uiAlert("올리지 못했어요. 인터넷 연결과 Firebase 규칙을 확인해주세요.");
     console.warn(err);
   });
 }
