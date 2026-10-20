@@ -294,7 +294,7 @@ function clockIn(employeeId) {
     clockIn: kstIso(date, start),
     clockOut: scheduledEnd(emp, date),
     createdAt: new Date().toISOString(),
-    ...(emp.trainee ? { training: true } : {}),
+    ...(traineeOn(emp, date) ? { training: true } : {}),
   });
   save();
   return null;
@@ -307,14 +307,17 @@ function setRecordTimes(empId, date, start, end) {
   const clockOut = endIso(date, start, end);
   const rec = recordFor(empId, date);
   if (rec) Object.assign(rec, { clockIn, clockOut, edited: true });
-  else store.records.push({ id: uid(), employeeId: empId, date, clockIn, clockOut, createdAt: new Date().toISOString(), edited: true, ...(employeeById(empId)?.trainee ? { training: true } : {}) });
+  else store.records.push({ id: uid(), employeeId: empId, date, clockIn, clockOut, createdAt: new Date().toISOString(), edited: true, ...(traineeOn(employeeById(empId), date) ? { training: true } : {}) });
   if (store.absent) delete store.absent[`${empId}|${date}`];
 }
 
 // 교육생(직원용 달력 + 로 처음 들어온 사람) · 교육으로 일한 기록은 이름 옆에 (교육)
 const isTrainingRec = (r) => Boolean(r?.training);
+// 그날 교육생인지: 근무표에 넣으면서 "근무표 시작일부터 직원"으로 정해 둔 사람(promoteFrom)은 그날부터 직원
+const traineeOn = (emp, date) => Boolean(emp?.trainee) && !(emp.promoteFrom && date >= emp.promoteFrom);
+const monthDay = (date) => `${Number(date.slice(5, 7))}/${Number(date.slice(8))}`;
 function nameLabel(emp, rec) {
-  const training = rec ? isTrainingRec(rec) : emp.trainee;
+  const training = rec ? isTrainingRec(rec) : traineeOn(emp, todayDateString());
   return `${esc(emp.name)}${training ? `<span class="train-tag"> (교육)</span>` : ""}`;
 }
 
@@ -323,7 +326,7 @@ function adminClockIn(empId, date) {
   const emp = employeeById(empId);
   if (!emp || recordFor(empId, date)) return;
   const { start } = shiftFor(emp, date);
-  store.records.push({ manual: true, id: uid(), employeeId: empId, date, clockIn: kstIso(date, start), clockOut: scheduledEnd(emp, date), createdAt: new Date().toISOString(), ...(emp.trainee ? { training: true } : {}) });
+  store.records.push({ manual: true, id: uid(), employeeId: empId, date, clockIn: kstIso(date, start), clockOut: scheduledEnd(emp, date), createdAt: new Date().toISOString(), ...(traineeOn(emp, date) ? { training: true } : {}) });
   if (store.absent) delete store.absent[`${empId}|${date}`];
   save();
 }
@@ -859,7 +862,7 @@ function renderEmployees() {
         <td><button type="button" class="status${e.active ? " on" : ""}" data-action="toggle-active" data-id="${e.id}">${e.active ? "재직중" : "비활성"}</button></td>
         <td>${
           e.trainee
-            ? `<button type="button" class="status train" data-action="promote-trainee" data-id="${e.id}" title="교육을 마치면 직원으로 등록해요. 그 전 교육 근무는 계속 교육수당으로 계산돼요">직원 등록</button>`
+            ? `<button type="button" class="status train" data-action="promote-trainee" data-id="${e.id}" title="교육을 마치면 직원으로 등록해요. 그 전 교육 근무는 계속 교육수당으로 계산돼요">${e.promoteFrom ? `${monthDay(e.promoteFrom)}부터 직원` : "직원 등록"}</button>`
             : `<button type="button" class="status${isManager(e) ? " on" : ""}" data-action="toggle-role" data-id="${e.id}" title="매니저는 근무표에만 나오고 출근·급여 계산에서 빠져요">${isManager(e) ? "매니저" : "알바"}</button>`
         }</td>
         <td><button type="button" class="danger" data-action="remove-employee" data-id="${e.id}">삭제</button></td>
@@ -1017,7 +1020,7 @@ function renderEmpSheet(e) {
       <button type="button" class="m-toggle${e.active ? " on" : ""}" data-action="toggle-active" data-id="${e.id}">${e.active ? "재직중" : "비활성"}</button>
       ${
         e.trainee
-          ? `<button type="button" class="m-toggle train" data-action="promote-trainee" data-id="${e.id}">직원으로 등록</button>`
+          ? `<button type="button" class="m-toggle train" data-action="promote-trainee" data-id="${e.id}">${e.promoteFrom ? `${monthDay(e.promoteFrom)}부터 직원 · 지금 등록` : "직원으로 등록"}</button>`
           : `<button type="button" class="m-toggle${isManager(e) ? " on" : ""}" data-action="toggle-role" data-id="${e.id}">${isManager(e) ? "매니저" : "알바"}</button>`
       }
     </div>
@@ -2593,14 +2596,39 @@ function commitSchedule() {
   const work = schedWork();
   if (work.meta) store.scheduleMeta = { ...work.meta, order: store.scheduleMeta?.order ?? work.meta.order }; // 기간이 바뀌면 적용 시작일도 바뀌므로 먼저
   pinPeriodYear();
+  // 근무표에 근무 시간을 넣은 교육생은 근무표 시작일부터 직원으로 등록
+  const promoted = store.employees.filter((e) => e.trainee && Object.values(work.weekly[e.id] ?? {}).some(Boolean));
   for (const [empId, days] of Object.entries(work.weekly)) {
     const emp = employeeById(empId);
     if (!emp) continue;
     for (const [wd, range] of Object.entries(days)) setWeekly(emp, wd, range);
   }
+  const start = scheduleStart();
+  const today = todayDateString();
+  for (const emp of promoted) {
+    if (start <= today) {
+      delete emp.trainee;
+      delete emp.promoteFrom;
+    } else emp.promoteFrom = start; // 그 전까지는 교육으로 일하고, 시작일부터 직원
+    // 시작일부터의 근무는 직원 근무 (교육수당이 아니라 기본급)
+    for (const r of store.records) if (r.employeeId === emp.id && r.date >= start) delete r.training;
+  }
   delete store.scheduleDraft;
   state.schedWork = { weekly: {}, meta: null };
   save();
+  return promoted.map((e) => (start <= today ? `${e.name}님을 직원으로 등록했어요` : `${e.name}님은 ${monthDay(start)}부터 직원이에요`));
+}
+
+// 근무표 시작일이 된 교육생을 직원으로 (관리자 화면에서)
+function promoteDueTrainees() {
+  if (!ADMIN_SITE || !isAdmin()) return;
+  const today = todayDateString();
+  const due = store.employees.filter((e) => e.trainee && e.promoteFrom && e.promoteFrom <= today);
+  for (const e of due) {
+    delete e.trainee;
+    delete e.promoteFrom;
+  }
+  if (due.length) save();
 }
 
 function scheduleLayout() {
@@ -2792,7 +2820,7 @@ function renderSlotPanel() {
           ? ""
           : `<select id="slot-emp" class="field" aria-label="직원">
               <option value="">직원 선택</option>
-              ${choices.map((e) => `<option value="${e.id}"${e.id === ed.addEmpId ? " selected" : ""}>${esc(e.name)}${isManager(e) ? " (매니저)" : ""}</option>`).join("")}
+              ${choices.map((e) => `<option value="${e.id}"${e.id === ed.addEmpId ? " selected" : ""}>${esc(e.name)}${isManager(e) ? " (매니저)" : e.trainee ? " (교육)" : ""}</option>`).join("")}
             </select>`
       }
       <div class="edit-row">
@@ -3181,6 +3209,7 @@ app.addEventListener("click", (e) => {
       uiConfirm(`${emp.name}님을 직원으로 등록할까요?\n지금까지 교육으로 일한 날은 계속 교육수당으로 계산돼요.`, { ok: "등록" }).then((yes) => {
         if (!yes) return;
         delete emp.trainee;
+        delete emp.promoteFrom;
         save();
         queueToast(`${emp.name}님을 직원으로 등록했어요`);
         render();
@@ -3348,8 +3377,8 @@ app.addEventListener("click", (e) => {
           if (!yes) return;
           state.slotEdit = null;
           state.periodTyped = false;
-          commitSchedule();
-          showToast("근무표를 저장했어요", "ok");
+          const notes = commitSchedule();
+          showToast(["근무표를 저장했어요", ...notes].join(" · "), "ok");
         });
       }
       return;
@@ -3725,7 +3754,7 @@ const FIREBASE_CONFIG = {
 var cloud = null; // { auth, db } — SDK 를 못 불러오면 이 기기에만 저장
 var remote = { pub: null, priv: null, pubLoaded: false, privLoaded: false, last: {}, seedAsked: false };
 
-const PUBLIC_EMP_KEYS = ["id", "name", "active", "role", "color", "weekly", "weeklyBase", "weeklyHistory", "trainee"];
+const PUBLIC_EMP_KEYS = ["id", "name", "active", "role", "color", "weekly", "weeklyBase", "weeklyHistory", "trainee", "promoteFrom"];
 
 // store → { "경로": "JSON 문자열" }
 function flattenStore(withPrivate) {
@@ -3799,6 +3828,7 @@ function cleanStore(data) {
       ...e,
       name: e.name.slice(0, 40),
       color: e.color ? cssColor(e.color) : e.color,
+      promoteFrom: safeDate(e.promoteFrom) ? e.promoteFrom : undefined,
       weekly: cleanWeekly(e.weekly),
       ...(e.weeklyBase ? { weeklyBase: cleanWeekly(e.weeklyBase) } : {}),
       ...(Array.isArray(e.weeklyHistory)
@@ -3955,6 +3985,7 @@ function applyRemote() {
   store = storeFromRemote();
   applyListOrderOnce();
   applyFixesOnce();
+  promoteDueTrainees();
   saveCache();
   requestRender();
 }
