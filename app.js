@@ -3258,6 +3258,14 @@ app.addEventListener("click", (e) => {
       if (state.slotEdit) liveSlot({ final: true });
       {
         // 저장할 근무표(아직 저장 전인 기간 포함)의 시작일
+        // 근무표를 바꿀 때마다 시작 날짜를 직접 다시 입력해야 저장 (예전 날짜 그대로 실수로 덮어쓰지 않게)
+        if (!state.periodTyped) {
+          window.alert("저장하기 전에 근무표 시작 날짜를 입력해주세요. 예전과 같은 날짜라도 다시 입력해야 저장돼요. (예: 20261020)");
+          const input = document.querySelector(".sc-period");
+          input?.focus();
+          input?.select();
+          return;
+        }
         const period = state.schedWork?.meta?.period ?? store.scheduleMeta?.period ?? "";
         // 시작 날짜(연·월·일)를 다 입력해야 저장 (날짜가 없으면 언제부터 바뀌는지 알 수 없다)
         const typed = period.match(/(\d{4})\s*[.\-/년]\s*(\d{1,2})\s*[.\-/월]\s*(\d{1,2})/);
@@ -3275,6 +3283,7 @@ app.addEventListener("click", (e) => {
         if (!window.confirm(`근무표를 저장하면 ${from} 부터 직원 관리·달력·근무 기록에 반영돼요. 저장할까요?`)) return;
       }
       state.slotEdit = null;
+      state.periodTyped = false;
       commitSchedule();
       showToast("근무표를 저장했어요", "ok");
       return;
@@ -3616,7 +3625,10 @@ function fitPeriod(input) {
 // 근무표 편집 패널: 입력하는 대로 왼쪽 표에 반영
 app.addEventListener("input", (e) => {
   if (e.target.id === "slot-start" || e.target.id === "slot-end") liveSlot();
-  if (e.target.classList.contains("sc-period")) livePeriod(e.target, e);
+  if (e.target.classList.contains("sc-period")) {
+    livePeriod(e.target, e);
+    state.periodTyped = true; // 저장 전에 시작 날짜를 직접 입력했는지
+  }
 });
 app.addEventListener("focusin", (e) => {
   if (!e.target.classList.contains("sc-period")) return;
