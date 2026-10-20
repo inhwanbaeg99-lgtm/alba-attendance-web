@@ -879,7 +879,6 @@ function renderEmployees() {
       <div><label for="f-wage">시급(원)</label><input id="f-wage" class="field money" style="width:112px" type="text" inputmode="numeric" value="${formatMoney(DEFAULT_WAGE)}" required /></div>
       <button type="submit" class="pill">추가</button>
     </form>
-    ${renderStaffLink()}
     <div class="table-wrap">
       <table class="schedule">
         <thead><tr><th>이름</th>${order.map((wd) => `<th class="${wd === 0 ? "rest" : ""}">${WEEKDAYS[wd]}</th>`).join("")}<th>시급</th><th>상태</th><th>구분</th><th>관리</th></tr></thead>
@@ -900,19 +899,6 @@ const staffUrl = () => new URL("../", location.href).href;
 // 직원용 달력으로 가는 버튼 (새 탭)
 const staffCalLink = (cls = "") =>
   `<a${cls ? ` class="${cls}"` : ""} href="${esc(staffUrl())}" target="_blank" rel="noopener" title="매장 데스크 기기에서 여는 직원용 달력">직원용 달력 ↗</a>`;
-function renderStaffLink() {
-  return `
-    <div class="staff-link">
-      <div>
-        <p class="staff-link-title">직원용 달력</p>
-        <p class="staff-link-url">${esc(staffUrl())}</p>
-      </div>
-      <div class="staff-link-actions">
-        <a class="pill plain-dark" href="${esc(staffUrl())}" target="_blank" rel="noopener">열기</a>
-        <button type="button" class="pill" data-action="copy-staff-link">주소 복사</button>
-      </div>
-    </div>`;
-}
 
 // =====================================================================
 // 휴대폰 관리자 화면: 아래 탭바 + 목록 + 아래에서 올라오는 시트
@@ -987,10 +973,6 @@ function renderEmployeesMobile() {
     "employees",
     `
     ${mHead(`직원 <span class="m-count">${store.employees.length}명</span>`, `<button type="button" class="m-add" data-action="open-sheet" data-sheet="add-emp">+ 추가</button>`)}
-    <div class="m-card m-link">
-      <div><b>직원용 달력</b><small>매장 데스크 기기에서 여는 주소</small></div>
-      <button type="button" class="pill" data-action="copy-staff-link">주소 복사</button>
-    </div>
     <div class="m-list">${list || `<p class="m-empty">아직 직원이 없어요.<br />오른쪽 위 <b>+ 추가</b>로 등록해주세요.</p>`}</div>`,
   );
 }
@@ -3329,12 +3311,6 @@ app.addEventListener("click", (e) => {
       return;
     case "reset-password":
       resetPassword();
-      return;
-    case "copy-staff-link":
-      navigator.clipboard?.writeText(staffUrl()).then(
-        () => showToast("직원용 달력 주소를 복사했어요", "ok"),
-        () => showToast("복사하지 못했어요. 주소를 길게 눌러 복사해주세요."),
-      );
       return;
     case "schedule-share":
       scheduleShare(el);
