@@ -4694,3 +4694,17 @@ td.name {
       0 20px 60px rgba(0, 0, 0, 0.5);
   }
 }
+
+/* 달력 + 이름 입력칸: 오늘 근무자 이름과 같은 글자 (15px 굵게), 안내 글(placeholder)은 보통 굵기 */
+#extra-name {
+  font-size: 15px;
+  font-weight: 700;
+}
+#extra-name::placeholder {
+  font-weight: 400;
+}
+/* 안내 · 확인 창 문구도 같은 글자 */
+.ui-msg {
+  font-size: 15px;
+  font-weight: 700;
+}
