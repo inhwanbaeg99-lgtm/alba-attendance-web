@@ -3823,25 +3823,41 @@ function applyListOrderOnce() {
 }
 
 // 사장님 요청으로 실제 데이터를 한 번만 고친다 (관리자 로그인 시). 한 번 하면 settings.fixes 에 남겨 다시 하지 않는다.
-// - 2026-10-20: 배예빈 목요일 7-12 → 7-15, 오늘부터 적용 (지난 근무 기록·주휴수당은 그대로)
+// - 2026-10-20: 배예빈 목요일 7-12 → 7-15, 10/1부터 원래 그랬던 것처럼
+//   (10/1 이후 근무표 기준을 바꾸고, 10/1~어제 목요일 7-12 기록도 7-15로. 9월은 그대로)
 var fixesDone = false; // 저장 직후 아직 옛 private 데이터로 다시 그려질 때 또 돌지 않게
 function applyFixesOnce() {
   if (fixesDone || !isAdmin() || !remote.privLoaded) return;
   const done = store.settings?.fixes ?? [];
-  if (done.includes("bae-thu-0715")) return;
+  const FIX = "bae-thu-0715-from1001";
+  if (done.includes(FIX)) return;
   fixesDone = true;
   const emp = store.employees.find((e) => e.name === "배예빈");
-  const thu = emp?.weekly[4];
-  if (thu && thu.start === "07:00" && thu.end === "12:00") {
-    const from = todayDateString();
+  if (emp) {
+    const FROM = "2026-10-01";
+    const THU = { start: "07:00", end: "15:00" };
     if (!emp.weeklyHistory) {
       emp.weeklyBase = structuredClone(emp.weekly);
       emp.weeklyHistory = [];
     }
-    emp.weekly[4] = { start: "07:00", end: "15:00" };
-    emp.weeklyHistory = [...emp.weeklyHistory.filter((snap) => snap.from < from), { from, weekly: structuredClone(emp.weekly) }];
+    // 10/1에 시작하는 근무표가 없으면 그 전 근무표를 복사해서 만든다 (9월 이전은 그대로)
+    if (!emp.weeklyHistory.some((h) => h.from === FROM)) {
+      emp.weeklyHistory = [...emp.weeklyHistory, { from: FROM, weekly: structuredClone(weeklyOn(emp, FROM)) }].sort((x, y) =>
+        x.from < y.from ? -1 : 1,
+      );
+    }
+    for (const h of emp.weeklyHistory) if (h.from >= FROM) h.weekly[4] = { ...THU };
+    emp.weekly[4] = { ...THU };
+    // 10/1 ~ 어제 목요일, 7-12로 남은 기록만 7-15로
+    const today = todayDateString();
+    for (const r of store.records) {
+      if (r.employeeId !== emp.id || r.date < FROM || r.date >= today || weekdayOf(r.date) !== 4) continue;
+      if (r.clockIn === kstIso(r.date, "07:00") && r.clockOut === endIso(r.date, "07:00", "12:00")) {
+        r.clockOut = endIso(r.date, THU.start, THU.end);
+      }
+    }
   }
-  store.settings = { ...store.settings, fixes: [...done, "bae-thu-0715"] };
+  store.settings = { ...store.settings, fixes: [...done, FIX] };
   save();
 }
 
