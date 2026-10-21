@@ -925,7 +925,7 @@ function payDaySelects(cls = "field") {
 const dot = (d) => (d ? d.replaceAll("-", ".") : "");
 
 // ---------- 정보 탭: 매장 · 직원 링크(근무 상세·급여명세서) · 이력서 양식 ----------
-const payUrl = () => new URL("../#/my", location.href).href;
+const payUrl = () => new URL("../pay/", location.href).href;
 const resumeUrl = () => new URL(`../resume.html?store=${encodeURIComponent(storeName())}`, location.href).href;
 function renderMyPage() {
   const keys = remote?.priv?.slipKeys ?? {};
@@ -3379,7 +3379,8 @@ function route() {
   if (ADMIN_SITE && !isAdmin()) return { name: "lock" };
   const day = hash.match(/^\/day\/(\d{4}-\d{2}-\d{2})$/);
   if (day) return { name: "day", date: day[1] };
-  if (!ADMIN_SITE) return { name: ["/my", "/pay", "/work"].includes(hash) ? "pay" : "home" };
+  // /pay/ 주소(카톡 미리보기 제목 "급여 MGC 근무")는 처음부터 내 근무 · 급여명세서 화면
+  if (!ADMIN_SITE) return { name: document.body.dataset.page === "pay" || ["/my", "/pay", "/work"].includes(hash) ? "pay" : "home" };
   const page = { "/records": "records", "/schedule": "schedule", "/calendar": "calendar", "/me": "me" }[hash];
   return { name: page ?? "employees" };
 }
