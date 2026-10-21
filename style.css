@@ -5142,3 +5142,13 @@ td.name {
 .me-payday .field {
   width: auto;
 }
+
+/* 컴퓨터: 내 근무 · 급여명세서를 넓게 */
+@media (min-width: 900px) {
+  .pay-inner {
+    width: min(880px, 100%);
+  }
+  .pay-page {
+    padding-top: 40px;
+  }
+}
