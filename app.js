@@ -781,7 +781,6 @@ function renderHome() {
     <div class="home">
       <div class="home-inner">${renderCalendarCard()}</div>
     </div>
-    ${Object.keys(remote?.pub?.slips ?? {}).length ? `<div class="pay-fabs"><a class="pay-fab" href="#/my">내 근무 · 명세서</a></div>` : ""}
     ${toastHtml()}`;
 }
 
