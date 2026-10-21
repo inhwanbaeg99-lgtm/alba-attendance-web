@@ -1132,7 +1132,8 @@ function renderRecordsMobile() {
       ${renderTimesheet(month, "")}
     </details>
     <div class="m-btns">
-      <button type="button" class="btn-ghost" data-action="fill-template-xlsx"${recs.length ? "" : " disabled"}>기본양식으로 저장</button>
+      <button type="button" class="btn-ghost" data-action="save-xlsx-template" title="매장 엑셀 양식(\"N월 근로현황\" 시트가 있는 파일)을 골라 이 브라우저에 저장해요">엑셀 양식 저장</button>
+      <button type="button" class="btn-ghost" data-action="fill-template-xlsx"${recs.length ? "" : " disabled"} title="저장한 엑셀 양식에 이 달 근무·급여를 채운 새 파일을 받아요">엑셀로 옮기기</button>
       <button type="button" class="btn-primary" data-action="payslip-pdf-all"${rows.length ? "" : " disabled"}>명세서 PDF 전체</button>
     </div>
     ${renderPayslipModal()}`,
@@ -1552,7 +1553,8 @@ function renderRecords() {
       <h3>근무 상세</h3>
       <div class="head-actions">
         ${employeeId ? `<button type="button" class="pill" data-action="share-ts-image" data-id="${employeeId}">카카오톡 전송하기</button>` : ""}
-        <button type="button" class="pill plain-dark" data-action="fill-template-xlsx"${recs.length ? "" : " disabled"}>기본양식으로 저장</button>
+        <button type="button" class="pill plain-dark" data-action="save-xlsx-template" title="매장 엑셀 양식(\"N월 근로현황\" 시트가 있는 파일)을 골라 이 브라우저에 저장해요">엑셀 양식 저장</button>
+        <button type="button" class="pill plain-dark" data-action="fill-template-xlsx"${recs.length ? "" : " disabled"} title="저장한 엑셀 양식에 이 달 근무·급여를 채운 새 파일을 받아요">엑셀로 옮기기</button>
       </div>
     </div>
     ${renderTimesheet(month, employeeId)}
@@ -1672,7 +1674,7 @@ async function withBusy(button, text, task) {
   }
 }
 
-// ---------- 엑셀: 기본양식으로 저장 ----------
+// ---------- 엑셀: 매장 양식 저장 · 엑셀로 옮기기 ----------
 // 처음 한 번 고른 기본양식(빈 엑셀)에 이 달 근무시간·수당·근무표를 채워 새 파일로 저장한다 (Chrome/Edge PC 전용).
 
 // days[i]가 속한 주(일~토, 월 경계는 안 넘음)의 [시작 인덱스, 끝 인덱스] 목록
@@ -1703,24 +1705,50 @@ function idbHandle(mode, key, value) {
   });
 }
 
-// 한 번 고른 파일을 key 이름으로 브라우저가 기억한다 (지금은 "baseTemplate" = 기본양식).
-async function getTemplateHandle(key, mode) {
-  if (!window.showOpenFilePicker) throw new Error("이 기능은 PC의 Chrome 또는 Edge 브라우저에서만 쓸 수 있어요.");
-  const saved = await idbHandle("readonly", key).catch(() => null);
-  if (saved) {
-    try {
-      const perm = (await saved.queryPermission({ mode })) === "granted" || (await saved.requestPermission({ mode })) === "granted";
-      if (perm) {
-        await saved.getFile(); // 옮겨지거나 지워졌으면 여기서 실패 -> 다시 고르기
-        return saved;
-      }
-    } catch {
-      // 다시 고르기
-    }
+// 매장 엑셀 양식: [엑셀 양식 저장]으로 고른 파일 내용을 이 브라우저(IndexedDB)에 보관한다
+const templateKey = () => "xlsxTemplate";
+
+// 예전 [기본양식으로 저장]에서 골라 둔 파일이 있으면 그 내용을 새 방식으로 옮겨 담는다 (한 번만)
+async function legacyTemplate() {
+  try {
+    const handle = await idbHandle("readonly", "baseTemplate");
+    if (!handle) return null;
+    const ok = (await handle.queryPermission({ mode: "read" })) === "granted" || (await handle.requestPermission({ mode: "read" })) === "granted";
+    if (!ok) return null;
+    const file = await handle.getFile();
+    const saved = { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()), savedAt: new Date().toISOString() };
+    await idbHandle("readwrite", templateKey(), saved);
+    await idbHandle("readwrite", "baseTemplate", null);
+    return saved;
+  } catch {
+    return null;
   }
-  const [handle] = await window.showOpenFilePicker({ types: [XLSX_TYPE] });
-  await idbHandle("readwrite", key, handle);
-  return handle;
+}
+
+function pickXlsxFile() {
+  return new Promise((resolve) => {
+    const input = Object.assign(document.createElement("input"), { type: "file", accept: ".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    input.addEventListener("change", () => resolve(input.files[0] ?? null));
+    input.click();
+  });
+}
+
+function saveXlsxTemplate(button) {
+  return withBusy(button, "저장 중…", async () => {
+    const file = await pickXlsxFile();
+    if (!file) return;
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const fflate = await loadLib("fflate");
+    let wb;
+    try {
+      wb = fflate.strFromU8(fflate.unzipSync(bytes, { filter: (f) => f.name === "xl/workbook.xml" })["xl/workbook.xml"]);
+    } catch {
+      throw new Error("엑셀(.xlsx) 파일이 아니에요. 엑셀 양식 파일을 골라주세요.");
+    }
+    if (!/<sheet name="(\d+|○)월 근로현황"/.test(wb)) throw new Error('이 파일에는 "N월 근로현황" 시트가 없어요. 매장 엑셀 양식 파일을 골라주세요.');
+    await idbHandle("readwrite", templateKey(), { name: file.name, bytes, savedAt: new Date().toISOString() });
+    showToast(`엑셀 양식을 저장했어요 (${file.name})`, "ok");
+  });
 }
 
 // 엑셀 파일(zip) 안에서 날짜 칸의 <v>만 바꿔치기한다 (SheetJS로 전체를 다시 조립하면 서식이 깨지거나
@@ -2343,25 +2371,29 @@ async function saveXlsxBytes(bytes, name) {
   return true;
 }
 
-// 기본양식으로 저장: 처음 한 번 고른 기본양식(빈 양식)은 그대로 두고, 이 달 내용을 채운 새 파일을 만든다
+// 엑셀로 옮기기: 저장해 둔 매장 양식은 그대로 두고, 이 달 값을 채운 새 파일을 만든다
 function fillTemplateXlsx(button) {
   return withBusy(button, "만드는 중…", async () => {
     const fflate = await loadLib("fflate");
     const { month } = state.payroll;
-    const handle = await getTemplateHandle("baseTemplate", "read");
-    const zip = fflate.unzipSync(new Uint8Array(await (await handle.getFile()).arrayBuffer()));
+    const template = (await idbHandle("readonly", templateKey()).catch(() => null)) ?? (await legacyTemplate());
+    if (!template?.bytes) {
+      uiAlert("먼저 [엑셀 양식 저장]으로 매장 엑셀 양식 파일을 저장해주세요.");
+      return;
+    }
+    const zip = fflate.unzipSync(new Uint8Array(template.bytes));
     let notFound;
     try {
       ({ notFound } = fillWorkbook(fflate, zip, month, ""));
     } catch (err) {
-      if (/기본양식/.test(err.message)) await idbHandle("readwrite", "baseTemplate", null); // 다음엔 다시 고르게
+      if (/기본양식/.test(err.message)) throw new Error("저장한 엑셀 양식을 읽지 못했어요. [엑셀 양식 저장]으로 양식을 다시 저장해주세요.");
       throw err;
     }
     assertWorkbookIntact(fflate, zip);
     const saved = await saveXlsxBytes(fflate.zipSync(zip, { level: 6 }), `메가커피 ${Number(month.slice(5, 7))}월 근무.xlsx`);
     if (!saved) return;
-    if (notFound.length) uiAlert(`저장했어요. 다만 "${notFound.join(", ")}" 이름은 기본양식에 줄이 없어서 빠졌어요. 기본양식에 그 직원 줄을 추가해주세요.`);
-    showToast("기본양식에 채워서 저장했어요");
+    if (notFound.length) uiAlert(`저장했어요. 다만 "${notFound.join(", ")}" 이름은 엑셀 양식에 줄이 없어서 빠졌어요.\n양식에 그 직원 줄을 추가하고 [엑셀 양식 저장]을 다시 해주세요.`);
+    showToast("엑셀 양식에 이 달 값을 옮겨 저장했어요", "ok");
   });
 }
 
@@ -3276,6 +3308,9 @@ app.addEventListener("click", (e) => {
     }
     case "fill-template-xlsx":
       fillTemplateXlsx(el);
+      return;
+    case "save-xlsx-template":
+      saveXlsxTemplate(el);
       return;
     case "share-ts-image":
       shareTimesheetImage(el, el.dataset.id);
