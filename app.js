@@ -950,7 +950,7 @@ function renderMyPage() {
           ${
             emps
               .map(
-                (e) => `<li><span class="name-cell"><span class="swatch" style="background:${cssColor(e.color)}"></span>${esc(e.name)}</span>
+                (e) => `<li><span class="name-cell">${esc(e.name)}</span>
               <span class="me-pin-state${keys[e.id] ? " on" : ""}">${keys[e.id] ? "공개 중" : "PIN 없음"}</span>
               <span class="me-pin-btns"><button type="button" class="pill plain-dark" data-action="slip-pin" data-id="${e.id}">${keys[e.id] ? "PIN 바꾸기" : "PIN 정하기"}</button>${keys[e.id] ? `<button type="button" class="pill plain" data-action="slip-off" data-id="${e.id}">끄기</button>` : ""}</span></li>`,
               )
@@ -1122,7 +1122,7 @@ function renderPayPage() {
       <p class="pay-sub">내 근무 및 급여명세서</p>
       ${
         names.length
-          ? `<ul class="pay-names">${names.map((e) => `<li><button type="button" data-action="pay-open" data-id="${e.id}"><span class="swatch" style="background:${cssColor(e.color)}"></span>${esc(e.name)}<span class="chev" aria-hidden="true">›</span></button></li>`).join("")}</ul>
+          ? `<ul class="pay-names">${names.map((e) => `<li><button type="button" data-action="pay-open" data-id="${e.id}">${esc(e.name)}<span class="chev" aria-hidden="true">›</span></button></li>`).join("")}</ul>
             <p class="pay-hint">본인 이름을 누르고 PIN을 입력해주세요.</p>`
           : `<p class="pay-hint">아직 공개된 내용이 없어요. 사장님께 PIN을 받았는지 확인해주세요.</p>`
       }`;
