@@ -999,14 +999,18 @@ async function publishSlips(onlyId = null) {
     if (payDateFor(ym) <= today) months.push(ym);
     ym = shiftMonth(ym, -1);
   }
-  const recent = Array.from({ length: 13 }, (_, i) => shiftMonth(today.slice(0, 7), -i));
+  // 근무 상세는 그달이 끝난 다음 달 1일부터 (이번 달은 아직 안 올린다)
+  const thisMonth = today.slice(0, 7);
+  const recent = Array.from({ length: 12 }, (_, i) => shiftMonth(thisMonth, -(i + 1)));
   slipBusy = true;
   try {
     if (!onlyId) await ensureSlipPins();
     for (const [empId, raw] of Object.entries(remote.priv?.slipKeys ?? {})) {
       const emp = employeeById(empId);
       if (!emp || (onlyId && empId !== onlyId)) continue;
-      // 근무 상세: 이번 달 포함 최근 13개월, 근무 기록이 있는 달만 (지급일과 상관없이 바로)
+      // 이번 달 근무 상세가 먼저 올라가 있었으면 내린다
+      if (slipsOf(empId)[`w-${thisMonth}`]) await cloud.db.ref(`public/slips/${empId}/w-${thisMonth}`).remove();
+      // 근무 상세: 지난 12개월, 근무 기록이 있는 달만
       for (const m of recent) {
         if (!timesheet(m, empId, { includeAll: true }).rows[0]?.total) continue;
         const html = renderTsCard(emp, m);
@@ -3343,7 +3347,7 @@ async function scheduleShare(button) {
 const TOURS = {
   me: () => [
     { sel: ".me-card:nth-of-type(2) .me-link", title: "직원 링크", text: "이 주소를 <b>단톡방 공지</b>에 올려 두세요. 직원이 눌러서 자기 PIN으로 자기 근무 상세와 급여명세서만 봐요." },
-    { sel: ".me-pins", title: "직원별 PIN", text: "직원마다 <b>PIN 6자리가 자동으로</b> 만들어져요. 개인 톡으로 알려 주세요. 근무 상세는 매일, 명세서는 <b>매달 5일</b>에 자동으로 올라가요. 잃어버렸으면 <b>새 PIN</b>으로 바꿔요." },
+    { sel: ".me-pins", title: "직원별 PIN", text: "직원마다 <b>PIN 6자리가 자동으로</b> 만들어져요. 개인 톡으로 알려 주세요. 근무 상세는 <b>다음 달 1일</b>, 명세서는 <b>다음 달 5일</b>에 자동으로 올라가요. 잃어버렸으면 <b>새 PIN</b>으로 바꿔요." },
     { sel: ".me-card:nth-of-type(3) .me-link", title: "이력서 양식", text: "지원자에게 이 주소를 문자로 보내면, 휴대폰으로 써서 A4 이력서 사진을 문자로 보내 줘요. 종이 양식은 열어서 ••• → 빈 양식 인쇄." },
   ],
   employees: (pc) =>
