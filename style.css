@@ -5329,3 +5329,20 @@ td.name {
 }
 
 /* ---------- 출근 PIN ---------- */
+
+/* 정보: 자동으로 만든 PIN */
+.me-pin {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums;
+}
+.me-pin.wait {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--ink-sub);
+}
+.me-card > .me-store:first-child {
+  margin-top: 0;
+}
