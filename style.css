@@ -5350,3 +5350,16 @@ td.name {
 .me-card h2 + .me-link {
   margin-top: 12px;
 }
+/* 매니저: 시급 칸에 월급제 */
+.wage-fixed {
+  display: inline-block;
+  padding: 4px 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink-sub);
+}
+.m-wage-fixed {
+  margin: 4px 0 0;
+  padding: 0;
+  font-size: 16px;
+}
