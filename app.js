@@ -910,14 +910,14 @@ function payDateFor(ym) {
     }
   }
   const last = new Date(y, m, 0).getDate();
-  const day = store.settings?.payday ?? "10";
-  const d = day === "last" ? last : Math.min(Number(day) || 10, last);
+  const day = store.settings?.payday ?? "5";
+  const d = day === "last" ? last : Math.min(Number(day) || 5, last);
   return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 }
-const payDayLabel = () => `${(store.settings?.payMonth ?? "next") === "next" ? "다음 달" : "그달"} ${(store.settings?.payday ?? "10") === "last" ? "말일" : `${store.settings?.payday ?? 10}일`}`;
+const payDayLabel = () => `${(store.settings?.payMonth ?? "next") === "next" ? "다음 달" : "그달"} ${(store.settings?.payday ?? "5") === "last" ? "말일" : `${store.settings?.payday ?? 5}일`}`;
 function payDaySelects(cls = "field") {
   const month = store.settings?.payMonth ?? "next";
-  const day = String(store.settings?.payday ?? "10");
+  const day = String(store.settings?.payday ?? "5");
   return `<select class="${cls}" data-setting="payMonth" aria-label="지급 달"><option value="next"${month === "next" ? " selected" : ""}>다음 달</option><option value="same"${month === "same" ? " selected" : ""}>그달</option></select>
     <select class="${cls}" data-setting="payday" aria-label="지급일">${[...Array.from({ length: 28 }, (_, i) => String(i + 1)), "last"].map((d) => `<option value="${d}"${d === day ? " selected" : ""}>${d === "last" ? "말일" : `${d}일`}</option>`).join("")}</select>`;
 }
