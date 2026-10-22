@@ -928,46 +928,7 @@ const dot = (d) => (d ? d.replaceAll("-", ".") : "");
 const SITE = "https://mgc-attendance.web.app/";
 const payUrl = () => `${SITE}pay`;
 
-// ---------- 카카오톡 공유 카드 (주소 글자 없이 "열기" 버튼만 보내기) ----------
-// developers.kakao.com 에서 만든 앱의 JavaScript 키 (공개용 키, 등록한 사이트 주소에서만 동작)
-const KAKAO_JS_KEY = "42d1080170cdb3eac0988b2c349af014";
-let kakaoReady = null;
-function loadKakao() {
-  if (window.Kakao?.isInitialized?.()) return Promise.resolve(window.Kakao);
-  if (kakaoReady) return kakaoReady;
-  kakaoReady = new Promise((resolve, reject) => {
-    const el = document.createElement("script");
-    el.src = "https://t1.kakaocdn.net/kakao_js_sdk/2.7.2/kakao.min.js";
-    el.crossOrigin = "anonymous";
-    el.onload = () => {
-      if (!window.Kakao.isInitialized()) window.Kakao.init(KAKAO_JS_KEY);
-      resolve(window.Kakao);
-    };
-    el.onerror = () => {
-      kakaoReady = null;
-      reject(new Error("카카오톡 공유를 불러오지 못했어요. 인터넷 연결을 확인해주세요."));
-    };
-    document.head.appendChild(el);
-  });
-  return kakaoReady;
-}
-async function kakaoSharePay() {
-  const Kakao = await loadKakao();
-  const url = payUrl();
-  Kakao.Share.sendDefault({
-    objectType: "feed",
-    content: {
-      title: "급여 MGC 근무",
-      description: "내 근무 상세와 급여명세서 · 이름을 누르고 PIN을 넣어 주세요",
-      imageUrl: `${SITE}icons/icon-512.png`,
-      imageWidth: 512,
-      imageHeight: 512,
-      link: { mobileWebUrl: url, webUrl: url },
-    },
-    buttons: [{ title: "열기", link: { mobileWebUrl: url, webUrl: url } }],
-  });
-}
-const resumeUrl = () => `${SITE}resume?store=${encodeURIComponent(storeName())}`;
+const resumeUrl = () => `${SITE}resume`; // 매장 이름은 이력서 페이지에 들어 있어요
 function renderMyPage() {
   const keys = remote?.priv?.slipKeys ?? {};
   const emps = store.employees.filter((e) => e.active);
@@ -983,8 +944,7 @@ function renderMyPage() {
       <section class="me-card">
         <h2>직원 링크 · 근무 상세와 급여명세서</h2>
         <p class="sub">이 주소를 단톡방에 올려 두면, 직원이 눌러서 <b>자기 PIN</b>으로 자기 것만 봐요. 근무 상세는 출퇴근이 찍힐 때마다, 명세서는 매달 <b>지급일</b>이 지나면 자동으로 올라가요.</p>
-        <div class="me-link"><span>${esc(payUrl())}</span>${KAKAO_JS_KEY ? `<button type="button" class="pill kakao-pill" data-action="kakao-pay-link">카카오톡으로 보내기</button>` : ""}<button type="button" class="pill${KAKAO_JS_KEY ? " plain-dark" : ""}" data-action="copy-pay-link">주소 복사</button></div>
-        ${KAKAO_JS_KEY ? `<p class="sub small">카카오톡으로 보내면 주소 글자 없이 "급여 MGC 근무" 카드와 [열기] 버튼만 가요.</p>` : ""}
+        <div class="me-link"><span>${esc(payUrl())}</span><button type="button" class="pill" data-action="copy-pay-link">주소 복사</button></div>
         <div class="me-payday"><span>급여 지급일</span>${payDaySelects()}</div>
         <ul class="me-pins">
           ${
@@ -3889,9 +3849,6 @@ app.addEventListener("click", (e) => {
       draftWeekly(employeeById(state.slotEdit.empId), state.slotEdit.wd, null);
       state.slotEdit = null;
       break;
-    case "kakao-pay-link":
-      kakaoSharePay().catch((err) => uiAlert(err.message));
-      return;
     case "copy-pay-link":
       navigator.clipboard?.writeText(payUrl()).then(
         () => showToast("직원 링크를 복사했어요. 단톡방에 붙여 넣어 주세요", "ok"),

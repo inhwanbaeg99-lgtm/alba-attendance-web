@@ -595,7 +595,7 @@
       const KEY = "kok-resume";
       const $ = (s) => document.querySelector(s);
       const form = $("#form");
-      const store = (new URLSearchParams(location.search).get("store") || "").slice(0, 40);
+      const store = (new URLSearchParams(location.search).get("store") || "메가MGC커피 춘천온의파크점").slice(0, 40);
       if (store) {
         $("#for").textContent = `${store} 아르바이트 지원서 · 다 쓰고 아래 문자 전송하기를 눌러 보내 주세요`;
         document.title = `이력서 · ${store}`;
