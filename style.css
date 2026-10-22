@@ -5353,13 +5353,14 @@ td.name {
 /* 매니저: 시급 칸에 월급제 */
 .wage-fixed {
   display: inline-block;
-  padding: 4px 8px;
+  padding: 5px 12px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
   font-size: 14px;
   font-weight: 700;
-  color: var(--ink-sub);
 }
 .m-wage-fixed {
   margin: 4px 0 0;
-  padding: 0;
-  font-size: 16px;
+  font-size: 15px;
 }

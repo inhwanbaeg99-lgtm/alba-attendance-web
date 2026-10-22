@@ -148,6 +148,8 @@ const INITIAL_SCHEDULE_META = { period: "2026.10.05 ~", notes: {} };
 
 const toWeekly = (days) => Object.fromEntries(Object.entries(days).map(([wd, range]) => [wd, parseRange(range)]));
 const isManager = (e) => e.role === "manager";
+// 근무표에서는 매니저를 이름 대신 "매니저"로 보여 준다
+const schedName = (e) => (isManager(e) ? "매니저" : e.name);
 
 function managerEmployee() {
   return { id: uid(), name: "매니저", phone: null, hourlyWage: 0, active: true, role: "manager", color: INITIAL_COLORS["매니저"], weekly: toWeekly(MANAGER_SCHEDULE) };
@@ -1415,7 +1417,7 @@ function renderDayShifts() {
       return `
         <button type="button" class="m-shift" style="--i:${i};--emp:${cssColor(e.color)}" data-action="edit-slot" data-wd="${wd}" data-id="${e.id}" data-start="${toMin(shift.start)}">
           <span class="m-shift-bar"></span>
-          <span class="m-shift-body"><b>${esc(e.name)}${isManager(e) ? `<em class="m-chip">매니저</em>` : ""}</b><small>${shift.start} ~ ${shift.end}</small></span>
+          <span class="m-shift-body"><b>${esc(schedName(e))}</b><small>${shift.start} ~ ${shift.end}</small></span>
           <span class="m-shift-hours">${hour1(hours)}시간</span>
         </button>`;
     })
@@ -3096,8 +3098,8 @@ function renderScheduleSheet({ wide = false } = {}) {
               const ed = state.slotEdit;
               const editing = ed && String(ed.wd) === String(d.wd) && (ed.empId ?? ed.addEmpId) === who.emp.id;
               // 휴대폰: 칸이 좁아 이름 대신 색만 (누구인지는 아래 색 안내)
-              const label = compact ? "" : esc(who.emp.name);
-              return `<td class="sc-name${editing ? " sc-editing" : ""}" ${slot} data-id="${who.emp.id}"${span} style="background:${bg};color:${textOn(bg)}"${compact ? ` title="${esc(who.emp.name)}" aria-label="${esc(who.emp.name)}"` : ""}>${label}</td>`;
+              const label = compact ? "" : esc(schedName(who.emp));
+              return `<td class="sc-name${editing ? " sc-editing" : ""}" ${slot} data-id="${who.emp.id}"${span} style="background:${bg};color:${textOn(bg)}"${compact ? ` title="${esc(schedName(who.emp))}" aria-label="${esc(schedName(who.emp))}"` : ""}>${label}</td>`;
             })
             .join(""),
         )
@@ -3172,7 +3174,7 @@ function renderSchedLegend(days) {
   if (!people.length) return "";
   return `
     <ul class="sc-legend">
-      ${people.map((e) => `<li><span class="sc-swatch" style="background:${cssColor(e.color)}"></span>${esc(e.name)}</li>`).join("")}
+      ${people.map((e) => `<li><span class="sc-swatch" style="background:${cssColor(e.color)}"></span>${esc(schedName(e))}</li>`).join("")}
     </ul>`;
 }
 
