@@ -928,7 +928,7 @@ const payUrl = () => new URL("../pay/", location.href).href;
 
 // ---------- 카카오톡 공유 카드 (주소 글자 없이 "열기" 버튼만 보내기) ----------
 // developers.kakao.com 에서 만든 앱의 JavaScript 키 (공개용 키, 등록한 사이트 주소에서만 동작)
-const KAKAO_JS_KEY = "";
+const KAKAO_JS_KEY = "42d1080170cdb3eac0988b2c349af014";
 let kakaoReady = null;
 function loadKakao() {
   if (window.Kakao?.isInitialized?.()) return Promise.resolve(window.Kakao);
