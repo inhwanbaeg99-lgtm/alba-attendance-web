@@ -817,11 +817,13 @@ function renderAdminShell(active, content, { center = false, wide = false } = {}
       <button type="button" class="logout" data-action="logout">로그아웃</button>
     </nav>
     <main class="admin-main${center ? " centered" : ""}${wide ? " wide" : ""}${state.pageEnter ? " page-enter" : ""}">${content}</main>
+    <button type="button" class="tour-fab" data-action="start-tour" aria-label="이 화면 사용법 보기"><span>?</span>사용법</button>
     ${toastHtml()}`;
 }
 
 // ? 버튼을 누르면 펼쳐지는 설명 (다른 화면에 갔다 오면 다시 접힘)
 function helpToggle(key, html) {
+  if (ADMIN_SITE) return ""; // 관리자 화면은 ? 사용법 튜토리얼로 설명
   const open = state.helpOpen[key];
   return `
     <div class="help">
@@ -1286,6 +1288,7 @@ function renderMobileShell(active, content) {
     <header class="m-top">
       <b class="m-store">${esc(storeName())}</b>
       ${staffCalLink("m-staff-link")}
+      <button type="button" class="m-tour" data-action="start-tour" aria-label="이 화면 사용법 보기">?</button>
       <button type="button" class="m-logout" data-action="logout">로그아웃</button>
     </header>
     <main class="m-main${state.pageEnter ? " page-enter" : ""}">${content}</main>
@@ -3374,6 +3377,308 @@ async function scheduleShare(button) {
   });
 }
 
+// ---------- 사용법 튜토리얼 (관리자 화면의 ? 사용법) ----------
+// 단계: { sel: 가리킬 칸, title, text, scene?: 그 단계에서 잠깐 펼쳐 보일 화면 }
+const TOURS = {
+  me: () => [
+    { sel: ".me-card:nth-of-type(2) .me-link", title: "직원 링크", text: "이 주소를 <b>단톡방 공지</b>에 올려 두세요. 직원이 눌러서 자기 PIN으로 자기 근무 상세와 급여명세서만 봐요." },
+    { sel: ".me-payday", title: "급여 지급일", text: "명세서가 공개되는 날이에요. 이 날이 지나면 그달 명세서가 자동으로 올라가요." },
+    { sel: ".me-pins", title: "직원별 PIN", text: "직원마다 <b>숫자 6자리 PIN</b>을 정하고 개인 톡으로 알려 주세요. 근무 상세는 매일, 명세서는 지급일마다 자동으로 올라가서 일일이 보낼 필요가 없어요." },
+    { sel: ".me-card:nth-of-type(3) .me-link", title: "이력서 양식", text: "지원자에게 이 주소를 문자로 보내면, 휴대폰으로 써서 A4 이력서 사진을 문자로 보내 줘요. 종이 양식은 열어서 ••• → 빈 양식 인쇄." },
+  ],
+  employees: (pc) =>
+    pc
+      ? [
+          { sel: "#add-employee", title: "직원 추가", text: "이름과 시급을 넣고 <b>추가</b>를 눌러요. 전화번호는 넣지 않아도 돼요." },
+          { sel: "table.schedule tbody tr:first-child .day-cell", title: "요일별 근무 시간", text: "칸에 <b>7-12</b>, <b>18-2230</b>처럼 입력하면 그 요일 고정 근무 시간이 저장돼요. 비우면 쉬는 날이에요." },
+          { sel: "table.schedule tbody tr:first-child .wage-cell", title: "시급", text: "직원마다 시급을 고쳐요. 급여 계산에 바로 반영돼요." },
+          { sel: "table.schedule tbody tr:first-child [data-action=toggle-active]", title: "재직중 · 비활성", text: "그만둔 직원은 <b>비활성</b>으로 바꿔요. 기록은 남고, 달력과 근무표에서만 빠져요." },
+          { sel: "table.schedule tbody tr:first-child [data-action=toggle-role]", title: "알바 · 매니저", text: "매니저로 바꾸면 목록 맨 위로 와요. 매니저는 출근을 안 찍어도 근무표대로 급여에 나와요." },
+        ]
+      : [
+          { sel: ".m-add", title: "직원 추가", text: "여기를 누르면 직원 추가 창이 열려요." },
+          { scene: "addSheet", sel: ".sheet", title: "직원 추가 창", text: "이름과 시급을 넣고 <b>추가</b>를 눌러요." },
+          { sel: ".m-list .m-row", title: "직원 누르기", text: "직원을 누르면 정보 창이 열려요." },
+          { scene: "empSheet", sel: ".sheet", title: "직원 정보", text: "요일별 근무 시간, 시급, 재직중·비활성, 알바·매니저를 여기서 바꿔요." },
+        ],
+  schedule: (pc) =>
+    pc
+      ? [
+          { sel: ".sc-period", title: "근무표 시작 날짜", text: "이 근무표를 언제부터 쓸지 숫자 8자리로 입력해요(예: 20261101). 저장할 때마다 한 번씩 다시 입력해야 저장돼요." },
+          { sel: "td.sc-name", title: "근무 칸", text: "색 칸이 근무예요. 누르면 오른쪽에서 그 근무 시간을 고치거나 뺄 수 있어요." },
+          { scene: "slot", sel: ".sched-panel", title: "근무 고치기 · 삭제", text: "시작·끝 시간을 고치면 표에 바로 보여요. <b>완료</b>로 넣고, 빼려면 <b>근무 삭제</b>를 눌러요." },
+          { sel: "td.sc-empty", title: "근무자 추가", text: "회색 빈 칸을 누르면 그 요일, 그 시각으로 근무자를 추가해요." },
+          { scene: "slotAdd", sel: ".sched-panel", title: "근무자 추가 입력칸", text: "직원을 고르고 시작·끝 시간을 넣은 뒤 <b>완료</b>를 눌러요." },
+          { sel: ".sc-actions [data-action=schedule-temp]", title: "임시저장", text: "고친 내용을 보관만 해요. 직원 화면·달력·근무 기록에는 아직 반영되지 않아요." },
+          { sel: ".sc-actions [data-action=schedule-save]", title: "저장", text: "시작 날짜부터 직원 화면, 달력, 근무 기록에 반영돼요." },
+          { sel: ".sc-actions [data-action=schedule-share]", title: "카카오톡 전송하기", text: "누르면 근무표를 사진으로 만들어요." },
+          { scene: "schedShare", sel: ".share-box", title: "근무표 사진", text: "이런 사진이 만들어져요. <b>복사하기</b>를 누르고 단톡방에 붙여넣으면 돼요." },
+        ]
+      : [
+          { sel: ".m-period", title: "근무표 시작 날짜", text: "이 근무표를 언제부터 쓸지 숫자 8자리로 입력해요. 저장할 때마다 한 번씩 다시 입력해야 저장돼요." },
+          { sel: ".m-days", title: "요일 고르기", text: "요일을 누르면 그날 근무자가 아래에 나와요." },
+          { sel: ".m-shift", title: "근무자 누르기", text: "근무자를 누르면 고치는 창이 열려요." },
+          { scene: "slot", sel: ".sheet", title: "근무 고치기 · 삭제", text: "시작·끝 시간을 고치고 <b>완료</b>, 빼려면 <b>근무 삭제</b>를 눌러요." },
+          { sel: ".m-add-shift", title: "근무자 추가", text: "이 요일에 근무자를 추가해요." },
+          { scene: "slotAdd", sel: ".sheet", title: "근무자 추가 창", text: "직원을 고르고 시간을 넣은 뒤 <b>완료</b>를 눌러요." },
+          { sel: ".m-fold > summary", title: "근무표 한눈에 보기", text: "일주일 근무표 전체를 볼 수 있어요." },
+          { sel: ".m-savebar", title: "저장 · 카톡 전송", text: "<b>저장</b>하면 시작 날짜부터 반영돼요. <b>카톡 전송</b>은 근무표를 사진으로 보내요." },
+          { scene: "schedShare", sel: ".share-box", title: "근무표 사진", text: "이런 사진이 만들어져요. <b>카카오톡 전송하기</b>로 단톡방에 보내요." },
+        ],
+  calendar: () => [
+    { sel: ".cal-head", title: "달 바꾸기", text: "화살표로 지난달, 다음 달을 봐요." },
+    { sel: [".cell:has(.day-num.today)", ".grid .cell"], title: "날짜 칸", text: "그날 출근 기록이 이름과 시간으로 보여요. 근무표보다 <b style=\"color:var(--more)\">더 일하면 파랑</b>, <b style=\"color:var(--red)\">덜 일하면 빨강</b>이에요. 날짜를 누르면 그날이 열려요." },
+    { scene: "day", sel: ".date-box", title: "그날 출근 기록", text: "날짜를 누르면 이렇게 열려요. 실제로 출근한 사람과 시간이에요." },
+    { scene: "day", sel: ".staff", title: "근무 예정", text: "그날 근무표에 있는 사람이에요. 이름을 누르면 고칠 수 있어요." },
+    { scene: "staff", sel: ".staff-item.expanded", title: "출근 처리 · 수정", text: "이름을 누르면 <b>수정</b>(그날만 시간 바꾸기), <b>출근 처리</b>(출근을 못 찍은 경우), <b>기록 삭제</b> 버튼이 나와요." },
+    { scene: "add", sel: "#add-extra", title: "대타 · 추가 근무", text: "<b>+</b>를 누르면 이름과 시간을 넣어 그날만 근무자를 추가해요." },
+  ],
+  records: (pc) =>
+    pc
+      ? [
+          { sel: ".month-nav", title: "달 바꾸기", text: "화살표로 지난달 급여를 볼 수 있어요." },
+          { sel: "#r-emp", title: "직원 고르기", text: "한 명을 고르면 그 사람 것만 보여요." },
+          { scene: "emp", sel: "[data-action=share-ts-image]", title: "카카오톡 전송하기", text: "직원을 고르면 나타나요. 누르면 이 직원의 한 달 근무를 달력 사진으로 만들어요." },
+          { scene: "share", sel: ".share-box img", title: "근무 사진 미리보기", text: "이런 사진이 만들어져요. 날짜별 근무 시간과 출퇴근 시간, 한 달 합계가 들어가요." },
+          { scene: "share", sel: ".share-actions", title: "복사하기 · 사진 저장", text: "<b>복사하기</b>를 누르고 카톡 채팅방에 붙여넣으면 사진으로 보내져요. 복사하면 <b>다음 직원으로 자동으로 넘어가서</b> 한 명씩 차례로 보낼 수 있어요." },
+          { scene: "emp", sel: [".ts-wrap", ".timesheet"], title: "이 직원 근무 상세", text: "날짜별 근무 시간이에요. 근무표보다 더 일하면 파랑, 덜 일하면 빨강으로 보여요." },
+          { sel: "#r-tax", title: "세금", text: "보통 3.3%를 떼요. 떼지 않으면 <b>공제 안 함</b>으로 바꿔요." },
+          { sel: "[data-action=save-xlsx-template]", title: "엑셀 양식 저장", text: "매장에서 쓰는 급여 엑셀 양식을 한 번 저장해 둬요." },
+          { sel: "[data-action=fill-template-xlsx]", title: "엑셀로 옮기기", text: "저장한 양식에 이번 달 근무·급여를 채운 엑셀 파일을 만들어요." },
+          { sel: ".pay-table", title: "급여 정산", text: "기본급, 주휴수당, 수당, 세금, 실지급액이 계산돼요. 주휴수당에 마우스를 올리면 주별 내역이 보여요." },
+          { sel: ".pay-table .ps-cell [data-action=open-payslip]", title: "명세서", text: "이름 옆 <b>명세서</b>를 누르면 명세서 창이 열려요." },
+          { scene: "payslip", sel: ".ps-allow", title: "수당 입력", text: "특근수당 같은 수당을 이름과 금액으로 넣어요. <b>+ 수당 추가</b>로 여러 개 넣을 수 있어요." },
+          { scene: "payslip", sel: ".ps-preview", title: "명세서 미리보기", text: "입력하는 대로 바로 바뀌고, 이 모양 그대로 PDF가 돼요. 직원 링크에도 이 명세서가 올라가요." },
+          { scene: "payslip", sel: ".ps-side [data-action=save-payslip]", title: "저장", text: "저장하면 급여 정산과 명세서에 반영돼요." },
+          { sel: ".section-head [data-action=payslip-pdf-all]", title: "명세서 PDF", text: "직원마다 따로 급여명세서 PDF를 받아요." },
+        ]
+      : [
+          { sel: ".m-month", title: "달 바꾸기", text: "화살표로 지난달 급여를 볼 수 있어요." },
+          { sel: ".m-hero", title: "이번 달 합계", text: "실지급액 합계예요. 오른쪽에서 세금(3.3% / 공제 안 함)을 바꿔요." },
+          { sel: ".m-pay", title: "직원 누르기", text: "직원을 누르면 그 사람 급여 내역이 열려요." },
+          { scene: "paySheet", sel: ".sheet .m-hero", title: "받을 금액", text: "이 직원이 받을 금액과 기본급, 주휴수당, 세금 내역이에요." },
+          { scene: "paySheet", sel: ".sheet .m-share", title: "카카오톡 전송하기", text: "누르면 이 직원의 한 달 근무를 달력 사진으로 만들어요." },
+          { scene: "share", sel: ".share-box img", title: "근무 사진 미리보기", text: "이런 사진이 만들어져요. 날짜별 근무 시간과 한 달 합계가 들어가요." },
+          { scene: "share", sel: ".share-actions", title: "카카오톡 전송하기", text: "<b>카카오톡 전송하기</b>를 누르면 공유 창이 열려서 카톡 채팅방을 고르면 돼요. <b>사진 저장</b>으로 앨범에 저장할 수도 있어요." },
+          { scene: "paySheet", sel: ".sheet .sheet-actions", title: "수당 · 명세서 / 명세서 PDF", text: "<b>수당 · 명세서</b>에서 수당을 넣고, <b>명세서 PDF</b>로 명세서를 받아요." },
+          { scene: "payslip", sel: ".ps-allow", title: "수당 입력", text: "특근수당 같은 수당을 이름과 금액으로 넣고 <b>저장</b>해요." },
+          { sel: ".m-fold > summary", title: "날짜별 근무 시간", text: "전체 직원의 날짜별 근무 시간 표예요." },
+          { sel: ".m-btns [data-action=payslip-pdf-all]", title: "명세서 PDF 전체", text: "직원마다 따로 급여명세서 PDF를 받아요." },
+        ],
+};
+
+// 튜토리얼이 잠깐 펼쳐 보이는 화면 (끝나면 원래대로). hash 가 있으면 그 화면으로 갔다가 set 을 한다.
+const firstPayEmp = () => payrollFor(state.payroll.month, "").rows[0]?.emp.id ?? null;
+const closeTourShare = () => document.querySelectorAll(".share-back [data-share=close]").forEach((b) => b.click());
+function tourSlot(add) {
+  const wd = isDesktop() ? 1 : state.schedDay ?? weekdayOf(todayDateString());
+  const emp = store.employees.find((e) => e.active && effWeekly(e)[wd]);
+  const r = emp && effWeekly(emp)[wd];
+  state.slotEdit = add
+    ? { wd: String(wd), empId: null, addEmpId: null, start: 540, snapshot: structuredClone(schedWork().weekly) }
+    : emp
+      ? { wd: String(wd), empId: emp.id, addEmpId: null, start: toMin(r.start), snapshot: structuredClone(schedWork().weekly) }
+      : null;
+}
+function tourPayslip() {
+  const id = firstPayEmp();
+  if (!id) return;
+  state.payslipId = id;
+  state.allowDraft = structuredClone(allowancesFor(state.payroll.month, id));
+  // 보여 주기용 예시 수당 (저장하지 않음, 튜토리얼이 끝나면 사라짐)
+  if (!state.allowDraft.length) state.allowDraft = [{ name: "특근수당", amount: 20000 }];
+}
+const TOUR_SCENES = {
+  day: { hash: () => (isDesktop() ? null : `#/day/${todayDateString()}`), set: () => isDesktop() && Object.assign(state, { selectedDate: todayDateString(), animateOpen: false }) },
+  staff: {
+    hash: () => (isDesktop() ? null : `#/day/${todayDateString()}`),
+    set: () => {
+      const d = todayDateString();
+      if (isDesktop()) Object.assign(state, { selectedDate: d, animateOpen: false });
+      const emp = scheduledOn(d)[0] ?? employeeById(recordsOn(d)[0]?.employeeId);
+      state.expandedId = emp?.id ?? null;
+    },
+  },
+  add: { hash: () => (isDesktop() ? null : `#/day/${todayDateString()}`), set: () => Object.assign(state, isDesktop() ? { selectedDate: todayDateString(), animateOpen: false, adding: true } : { adding: true }) },
+  emp: { set: () => (state.payroll.employeeId = firstPayEmp() ?? "") },
+  payslip: { set: tourPayslip },
+  share: {
+    set: async () => {
+      const id = firstPayEmp();
+      if (!id) return;
+      if (isDesktop()) state.payroll.employeeId = id;
+      else state.sheet = { type: "pay", id };
+      render();
+      await shareTimesheetImage(document.createElement("button"), id);
+    },
+  },
+  schedShare: { set: async () => scheduleShare(document.createElement("button")) },
+  paySheet: { set: () => (state.sheet = { type: "pay", id: firstPayEmp() }) },
+  slot: { set: () => tourSlot(false) },
+  slotAdd: { set: () => tourSlot(true) },
+  empSheet: { set: () => (state.sheet = { type: "emp", id: store.employees[0]?.id ?? null }) },
+  addSheet: { set: () => (state.sheet = { type: "add-emp", id: null }) },
+};
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function applyTourScene(name) {
+  if (tour.scene === name) return;
+  const b = tour.base;
+  // 튜토리얼 시작 때 모습으로 되돌린 뒤 이 단계의 화면을 펼친다
+  closeTourShare();
+  Object.assign(state, { selectedDate: b.selectedDate, expandedId: null, adding: false, editingId: null, editingWhere: null, sheet: null, payslipId: null, allowDraft: null, salDraft: null, slotEdit: null, contractDraft: null });
+  state.payroll.employeeId = b.payrollEmp;
+  const sc = name ? TOUR_SCENES[name] : null;
+  const target = sc?.hash?.() ?? b.hash;
+  if (location.hash !== target) {
+    tour.nav = true;
+    location.hash = target;
+    await sleep(80); // 화면이 바뀐 뒤에 펼친다
+    tour.nav = false;
+  }
+  const done = sc?.set();
+  Object.assign(state, { modalEnter: false, sheetEnter: false, dayEnter: false, expandEnter: false });
+  render();
+  if (done instanceof Promise) await done.catch(() => {}); // 사진 만들기처럼 시간이 걸리는 장면
+  tour.scene = name;
+  await sleep(30);
+}
+
+let tour = null; // { steps, i, timer }
+
+function tourEl(sel) {
+  for (const one of [].concat(sel)) {
+    const el = document.querySelector(`#app ${one}`) ?? document.querySelector(one);
+    if (el && el.getClientRects().length && !el.closest(".tour")) return el;
+  }
+  return null;
+}
+
+function startTour(page) {
+  if (state.sheet || state.payslipId || state.slotEdit) {
+    state.sheet = null;
+    state.payslipId = null;
+    state.slotEdit = null;
+    render();
+  }
+  // 펼쳐서 보여 줄 단계(scene)는 그때 확인하고, 지금 화면 단계는 지금 있는 것만
+  const steps = (TOURS[page]?.(isDesktop()) ?? []).filter((s) => s.scene || tourEl(s.sel));
+  if (!steps.length) return;
+  endTour();
+  const root = document.createElement("div");
+  root.className = "tour";
+  root.innerHTML = `
+    <div class="tour-block"></div>
+    <div class="tour-spot"></div>
+    <div class="tour-tip" role="dialog" aria-modal="true" aria-labelledby="tour-title">
+      <p class="tour-title" id="tour-title"></p>
+      <p class="tour-text"></p>
+      <div class="tour-foot">
+        <button type="button" class="tour-skip" data-tour="end">건너뛰기</button>
+        <span class="tour-count"></span>
+        <button type="button" class="tour-prev" data-tour="prev">이전</button>
+        <button type="button" class="tour-next" data-tour="next">다음</button>
+      </div>
+    </div>`;
+  root.addEventListener("click", (e) => {
+    const k = e.target.closest("[data-tour]")?.dataset.tour;
+    if (k === "end") endTour();
+    if (k === "prev") showTourStep(tour.i - 1, -1);
+    if (k === "next") tour.i + 1 < tour.steps.length ? showTourStep(tour.i + 1) : endTour();
+  });
+  document.body.appendChild(root);
+  tour = {
+    steps, i: 0, root, timer: setInterval(placeTour, 250), scene: null, nav: false, busy: false,
+    base: { hash: location.hash, selectedDate: state.selectedDate, payrollEmp: state.payroll.employeeId },
+  };
+  document.addEventListener("keydown", tourKey, true);
+  window.addEventListener("resize", placeTour);
+  window.addEventListener("scroll", placeTour, true);
+  showTourStep(0);
+}
+
+function tourKey(e) {
+  if (!tour) return;
+  if (e.key === "Escape") endTour();
+  else if (e.key === "ArrowRight" || e.key === "Enter") tour.i + 1 < tour.steps.length ? showTourStep(tour.i + 1) : endTour();
+  else if (e.key === "ArrowLeft") showTourStep(tour.i - 1, -1);
+  else return;
+  e.preventDefault();
+  e.stopPropagation();
+}
+
+async function showTourStep(i, dir = 1) {
+  if (!tour || tour.busy || i < 0 || i >= tour.steps.length) return;
+  tour.busy = true;
+  const step = tour.steps[i];
+  await applyTourScene(step.scene ?? null);
+  if (!tour) return;
+  tour.busy = false;
+  // 펼쳤는데도 가리킬 곳이 없으면(예: 직원이 없음) 그 단계는 건너뛴다
+  if (!tourEl(step.sel)) {
+    if (i + dir >= 0 && i + dir < tour.steps.length) return showTourStep(i + dir, dir);
+    return dir > 0 ? endTour() : undefined;
+  }
+  tour.i = i;
+  const q = (c) => tour.root.querySelector(c);
+  q(".tour-title").textContent = step.title;
+  q(".tour-text").innerHTML = step.text;
+  q(".tour-count").textContent = `${i + 1} / ${tour.steps.length}`;
+  q(".tour-prev").hidden = i === 0;
+  q(".tour-next").textContent = i + 1 === tour.steps.length ? "완료" : "다음";
+  tour.root.classList.remove("show");
+  void tour.root.offsetWidth; // 단계마다 말풍선이 새로 나타나게
+  tour.root.classList.add("show");
+  tourEl(step.sel)?.scrollIntoView({ block: "center", behavior: reducedMotion() ? "auto" : "smooth" });
+  placeTour();
+  q(".tour-next").focus({ preventScroll: true });
+}
+
+// 가리키는 칸이 움직여도(스크롤·다시 그리기) 따라가게 자주 다시 잰다
+function placeTour() {
+  if (!tour) return;
+  const el = tourEl(tour.steps[tour.i].sel);
+  const spot = tour.root.querySelector(".tour-spot");
+  const tip = tour.root.querySelector(".tour-tip");
+  if (!el) return;
+  const pad = 6;
+  const r = el.getBoundingClientRect();
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  Object.assign(spot.style, { left: `${r.left - pad}px`, top: `${r.top - pad}px`, width: `${r.width + pad * 2}px`, height: `${r.height + pad * 2}px` });
+  const tw = tip.offsetWidth;
+  const th = tip.offsetHeight;
+  const gap = 14;
+  const below = r.bottom + pad + gap + th < vh - 8 || r.top - pad - gap - th < 8;
+  const top = below ? Math.min(r.bottom + pad + gap, vh - th - 8) : r.top - pad - gap - th;
+  const left = Math.min(Math.max(12, r.left + r.width / 2 - tw / 2), vw - tw - 12);
+  Object.assign(tip.style, { left: `${left}px`, top: `${Math.max(8, top)}px` });
+  tip.dataset.side = below ? "below" : "above";
+  tip.style.setProperty("--arrow-x", `${Math.min(Math.max(20, r.left + r.width / 2 - left), tw - 20)}px`);
+}
+
+function endTour() {
+  if (!tour) return;
+  const t = tour;
+  // 펼쳐 둔 화면을 시작할 때 모습으로
+  closeTourShare();
+  if (t.scene) {
+    Object.assign(state, { selectedDate: t.base.selectedDate, expandedId: null, adding: false, sheet: null, payslipId: null, allowDraft: null, salDraft: null, slotEdit: null, contractDraft: null });
+    state.payroll.employeeId = t.base.payrollEmp;
+    if (location.hash !== t.base.hash) {
+      t.nav = true;
+      location.hash = t.base.hash;
+      setTimeout(() => (t.nav = false), 80);
+    } else render();
+  }
+  clearInterval(tour.timer);
+  document.removeEventListener("keydown", tourKey, true);
+  window.removeEventListener("resize", placeTour);
+  window.removeEventListener("scroll", placeTour, true);
+  tour.root.remove();
+  tour = null;
+}
+
 // ---------- 라우팅 ----------
 
 function route() {
@@ -3450,12 +3755,14 @@ function render() {
 }
 
 function navigate(hash) {
+  endTour();
   state.error = "";
   if (location.hash === hash) render();
   else location.hash = hash;
 }
 
 window.addEventListener("hashchange", () => {
+  if (!tour?.nav) endTour();
   state.pageEnter = true;
   state.sheet = null;
   resetDayUi();
@@ -3896,6 +4203,9 @@ app.addEventListener("click", (e) => {
       }
       return;
     }
+    case "start-tour":
+      startTour(route().name);
+      return;
     case "toggle-help": {
       const key = el.dataset.key;
       state.helpOpen[key] = !state.helpOpen[key];
