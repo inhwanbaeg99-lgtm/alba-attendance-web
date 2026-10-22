@@ -5372,3 +5372,10 @@ td.name {
 .wage-cell input.field {
   text-align: center;
 }
+/* 직원 링크: 이름을 한 줄에 두 명씩 */
+.pay-names {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.pay-names button {
+  min-width: 0;
+}
