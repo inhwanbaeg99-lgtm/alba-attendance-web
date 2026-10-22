@@ -5353,7 +5353,10 @@ td.name {
 /* 매니저: 시급 칸에 월급제 */
 .wage-fixed {
   display: inline-block;
-  padding: 5px 12px;
+  box-sizing: border-box;
+  width: 80px;
+  text-align: center;
+  padding: 5px 8px;
   border-radius: 8px;
   background: var(--accent-soft);
   color: var(--accent);
@@ -5363,4 +5366,9 @@ td.name {
 .m-wage-fixed {
   margin: 4px 0 0;
   font-size: 15px;
+}
+
+/* 시급 숫자도 가운데 (월급제 상자와 맞춤) */
+.wage-cell input.field {
+  text-align: center;
 }
