@@ -2,6 +2,12 @@
   "hosting": {
     "public": "_site",
     "cleanUrls": true,
-    "ignore": ["**/.*"]
+    "ignore": ["**/.*"],
+    "headers": [
+      {
+        "source": "**",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+      }
+    ]
   }
 }
