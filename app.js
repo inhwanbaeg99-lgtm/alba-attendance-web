@@ -1122,7 +1122,7 @@ function renderPayPage() {
       <p class="pay-sub">내 근무 및 급여명세서</p>
       ${
         names.length
-          ? `<ul class="pay-names">${names.map((e) => `<li><button type="button" data-action="pay-open" data-id="${e.id}">${esc(e.name)}<span class="chev" aria-hidden="true">›</span></button></li>`).join("")}</ul>
+          ? `<ul class="pay-names">${names.map((e) => `<li><button type="button" data-action="pay-open" data-id="${e.id}">${esc(e.name)}<span class="chev" aria-hidden="true">${ICON_CHEVRON}</span></button></li>`).join("")}</ul>
             <p class="pay-hint">본인 이름을 누르고 PIN을 입력해주세요.</p>`
           : `<p class="pay-hint">아직 공개된 내용이 없어요. 사장님께 PIN을 받았는지 확인해주세요.</p>`
       }`;

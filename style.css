@@ -5379,3 +5379,10 @@ td.name {
 .pay-names button {
   min-width: 0;
 }
+.pay-names {
+  gap: 12px;
+}
+.pay-names .chev {
+  display: grid;
+  place-items: center;
+}
