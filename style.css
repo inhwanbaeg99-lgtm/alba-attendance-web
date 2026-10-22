@@ -5152,3 +5152,7 @@ td.name {
     padding-top: 40px;
   }
 }
+.pill.kakao-pill {
+  background: #fee500;
+  color: #191919;
+}
