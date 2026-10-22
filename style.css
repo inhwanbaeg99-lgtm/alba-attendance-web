@@ -5346,3 +5346,7 @@ td.name {
 .me-card > .me-store:first-child {
   margin-top: 0;
 }
+/* 정보: 제목 바로 아래 주소 칸과 살짝 띄우기 */
+.me-card h2 + .me-link {
+  margin-top: 12px;
+}
