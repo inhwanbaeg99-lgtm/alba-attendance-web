@@ -924,7 +924,9 @@ function payDaySelects(cls = "field") {
 const dot = (d) => (d ? d.replaceAll("-", ".") : "");
 
 // ---------- 정보 탭: 매장 · 직원 링크(근무 상세·급여명세서) · 이력서 양식 ----------
-const payUrl = () => new URL("../pay/", location.href).href;
+// 직원·지원자에게 보내는 주소는 github 대신 Firebase 무료 주소 (deploy-firebase.sh 로 올림)
+const SITE = "https://mgc-attendance.web.app/";
+const payUrl = () => `${SITE}pay`;
 
 // ---------- 카카오톡 공유 카드 (주소 글자 없이 "열기" 버튼만 보내기) ----------
 // developers.kakao.com 에서 만든 앱의 JavaScript 키 (공개용 키, 등록한 사이트 주소에서만 동작)
@@ -957,7 +959,7 @@ async function kakaoSharePay() {
     content: {
       title: "급여 MGC 근무",
       description: "내 근무 상세와 급여명세서 · 이름을 누르고 PIN을 넣어 주세요",
-      imageUrl: new URL("../icons/icon-512.png", location.href).href,
+      imageUrl: `${SITE}icons/icon-512.png`,
       imageWidth: 512,
       imageHeight: 512,
       link: { mobileWebUrl: url, webUrl: url },
@@ -965,7 +967,7 @@ async function kakaoSharePay() {
     buttons: [{ title: "열기", link: { mobileWebUrl: url, webUrl: url } }],
   });
 }
-const resumeUrl = () => new URL(`../resume.html?store=${encodeURIComponent(storeName())}`, location.href).href;
+const resumeUrl = () => `${SITE}resume?store=${encodeURIComponent(storeName())}`;
 function renderMyPage() {
   const keys = remote?.priv?.slipKeys ?? {};
   const emps = store.employees.filter((e) => e.active);
