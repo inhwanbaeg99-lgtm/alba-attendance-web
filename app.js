@@ -1125,7 +1125,8 @@ function renderPinPad() {
 
 function renderPayPage() {
   const v = state.payView;
-  const names = store.employees.filter((e) => slipsOf(e.id).check);
+  // 매니저는 출근을 안 찍어서 근무 상세(/work)에서는 빼고, 급여명세서(/pay)에만 나온다
+  const names = store.employees.filter((e) => slipsOf(e.id).check && !(pageTab() === "work" && isManager(e)));
   let body;
   if (!remote?.pubLoaded) body = `<p class="sub pay-wait">불러오는 중이에요…</p>`;
   else if (state.payPin) body = renderPinPad();
