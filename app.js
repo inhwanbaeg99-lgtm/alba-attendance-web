@@ -871,7 +871,7 @@ function renderEmployees() {
             ? `<button type="button" class="status train" data-action="promote-trainee" data-id="${e.id}" title="교육을 마치면 직원으로 등록해요. 그 전 교육 근무는 계속 교육수당으로 계산돼요">${e.promoteFrom ? `${monthDay(e.promoteFrom)}부터 직원` : "직원 등록"}</button>`
             : `<button type="button" class="status${isManager(e) ? " on" : ""}" data-action="toggle-role" data-id="${e.id}" title="매니저는 근무표에만 나오고 출근·급여 계산에서 빠져요">${isManager(e) ? "매니저" : "알바"}</button>`
         }</td>
-        <td><button type="button" class="danger" data-action="remove-employee" data-id="${e.id}">삭제</button></td>
+        <td class="manage-cell">${contractButton(e)}<button type="button" class="danger" data-action="remove-employee" data-id="${e.id}">삭제</button></td>
       </tr>`,
     )
     .join("");
@@ -895,7 +895,8 @@ function renderEmployees() {
       "employees",
       `요일 칸에 <b>7-12</b>, <b>18-2230</b> 처럼 입력하면 근무 시간이 저장돼요. 비우면 쉬는 날이에요.<br />
       이름 앞 색은 근무표 색이에요(자동으로 겹치지 않게 정해져요). 근무표에서 같은 시각에 시작하면 위에 있는 사람이 왼쪽 칸에 들어가요.`,
-    )}`,
+    )}
+    ${renderContractModal()}`,
     { center: true },
   );
 }
@@ -1275,6 +1276,406 @@ async function paySave() {
 }
 
 
+// 직원 표의 계약서 버튼: 없음 / 작성 중 / 서명 완료
+function contractButton(e) {
+  const c = latestContract(e.id);
+  const label = !c ? "계약서" : c.status === "signed" ? "계약서 ✓" : "작성 중";
+  return `<button type="button" class="ct-btn${c?.status === "signed" ? " on" : c ? " draft" : ""}" data-action="open-contract" data-id="${e.id}" title="전자 근로계약서">${label}</button>`;
+}
+
+// ---------- 전자 근로계약서 (메가MGC커피 시간제 근로계약서 양식) ----------
+// 종이 계약서와 같은 순서·문구로 A4 두 장을 만들고, 매장 화면에서 직원과 사장님이 손가락으로 서명한다.
+const CT_DAYS = [1, 2, 3, 4, 5, 6, 0]; // 월~일 (종이 양식 순서)
+const lawBreak = (min) => (min >= 480 ? 60 : min >= 240 ? 30 : 0);
+const spanMin = (start, end) => {
+  const m = toMin(end) - toMin(start);
+  return m > 0 ? m : m + 1440;
+};
+const hm = (min) => (min % 60 ? `${Math.floor(min / 60)}시간 ${min % 60}분` : `${min / 60}시간`);
+const ymdParts = (d) => (d ? [d.slice(0, 4), Number(d.slice(5, 7)), Number(d.slice(8))] : ["", "", ""]);
+const contractsOf = (empId) => (store.contracts ?? []).filter((c) => c.empId === empId).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+const latestContract = (empId) => contractsOf(empId)[0] ?? null;
+const pickRestDay = (days) => [0, 6, 1, 2, 3, 4, 5].find((wd) => !days?.[wd]) ?? 0;
+const MGC_BIZ = { bizNo: "769-01-03097", address: "강원특별자치도 춘천시 스포츠타운길 522, 101호(온의동)" };
+
+function newContract(emp) {
+  const biz = { ...MGC_BIZ, ...(store.settings?.biz ?? {}) };
+  const days = {};
+  for (const wd of CT_DAYS) {
+    const r = emp.weekly?.[wd];
+    if (r) days[wd] = { start: r.start, end: r.end, breakMin: lawBreak(spanMin(r.start, r.end)) };
+  }
+  const today = todayDateString();
+  const yearLater = `${Number(today.slice(0, 4)) + 1}${today.slice(4)}`;
+  return {
+    id: uid(),
+    empId: emp.id,
+    createdAt: new Date().toISOString(),
+    status: "draft",
+    signedAt: null,
+    empSign: null,
+    ownerSign: null,
+    f: {
+      empName: emp.name,
+      empBirth: "",
+      empAddress: "",
+      empPhone: emp.phone ? formatPhone(emp.phone) : "",
+      probStart: "",
+      probEnd: "",
+      start: today,
+      end: addDays(yearLater, -1),
+      place: storeName(),
+      job: "음료 디저트 제조 및 제공, 매장 청소 및 관리",
+      days,
+      restDay: pickRestDay(days),
+      wage: emp.hourlyWage ?? DEFAULT_WAGE,
+      payday: 5,
+      bizNo: biz.bizNo,
+      bizAddress: biz.address,
+      owner: biz.owner ?? "",
+    },
+  };
+}
+
+// 종이 양식 그대로 (A4 두 장)
+function renderContract(c) {
+  const f = c.f;
+  const sign = (img) => (img ? `<img class="mc-sign" src="${img}" alt="서명" />` : "");
+  const date3 = (d) => {
+    const [y, m, dd] = ymdParts(d);
+    return `<u>${y || "20&nbsp;&nbsp;&nbsp;"}</u> 년 <u>${m || "&nbsp;&nbsp;&nbsp;"}</u> 월 <u>${dd || "&nbsp;&nbsp;&nbsp;"}</u> 일`;
+  };
+  const cell = (wd, kind) => {
+    const d = f.days?.[wd];
+    if (!d) return "";
+    if (kind === "work") return `${Number(((spanMin(d.start, d.end) - (Number(d.breakMin) || 0)) / 60).toFixed(1))} 시간`;
+    if (kind === "start") return d.start;
+    if (kind === "break") return d.breakMin ? `${d.breakMin}분` : "없음";
+    return d.end;
+  };
+  const rows = [
+    ["근로시간", "work"],
+    ["시업시간", "start"],
+    ["휴게시간", "break"],
+    ["종업시간", "end"],
+  ];
+  return `
+    <div class="contract-doc mc-doc">
+      <div class="mc-page">
+        <h1 class="mc-title">시간제 근로계약서</h1>
+        <p class="mc-lead">${esc(storeName())}(이하 '회사'라 함)과 <u class="mc-fill">${esc(f.empName)}</u>(이하 '근로자'라 함)은 아래 사항에 대하여 성실하게 준수할 것을 서약하고 본 근로계약을 체결한다.</p>
+        <p class="mc-p">수습 계약직 근로 기간 : ${f.probStart ? `${date3(f.probStart)} ~ ${date3(f.probEnd)}` : `20&nbsp;&nbsp;&nbsp; 년&nbsp;&nbsp;&nbsp; 월&nbsp;&nbsp;&nbsp; 일 ~ 20&nbsp;&nbsp;&nbsp; 년&nbsp;&nbsp;&nbsp; 월&nbsp;&nbsp;&nbsp; 일`}</p>
+        <p class="mc-p">수습 계약직 기간內 업무 적격 여부 판단에 따라 고용의 계속 여부를 결정할 수 있다.</p>
+        <p class="mc-p">위 수습 계약 종료 시점에 회사가 별도의 계약만료 통보를 하지 않을 시, 하단 1번의 기간으로 재 계약 하는 것으로 간주한다.</p>
+        <ol class="mc-list">
+          <li><b>근로 계약기간 :</b> ${date3(f.start)} ~ ${date3(f.end)}</li>
+          <li><b>근무장소 :</b> ${esc(f.place)}</li>
+          <li><b>담당업무 :</b> ${esc(f.job)}</li>
+          <li><b>근무일 및 근로시간</b>
+            <table class="mc-days">
+              <thead><tr><th>구 분</th>${CT_DAYS.map((wd) => `<th>${WEEKDAYS[wd]}요일</th>`).join("")}</tr></thead>
+              <tbody>${rows.map(([label, kind]) => `<tr><th>${label}</th>${CT_DAYS.map((wd) => `<td>${cell(wd, kind)}</td>`).join("")}</tr>`).join("")}</tbody>
+            </table>
+            <p class="mc-note">- 휴게시간 : 4시간당 30분, 8시간당 1시간을 부여함</p>
+            <p class="mc-note">□ 주 휴 일 : 매주 <u>&nbsp;${WEEKDAYS[f.restDay ?? 0]}&nbsp;</u>요일 ※ 휴게시간과 주휴일은 매장 상황에 따라 변동될 수 있음</p>
+          </li>
+          <li><b>급 여</b>
+            <p class="mc-note">□ 시&nbsp;&nbsp; 급 : <b>${Number(f.wage || 0).toLocaleString()} 원</b></p>
+            <p class="mc-note">급여는 매월 ${Number(f.payday) || 5}일 근로자 명의 예금통장에 이체한다. (휴일의 경우 전일 지급한다)</p>
+          </li>
+          <li><b>연차 유급휴가</b>
+            <p class="mc-note">□ 연차 유급휴가는 관계 법령 및 취업규칙이 정하는 바에 따라 부여함</p>
+          </li>
+          <li><b>손해배상</b>
+            <p class="mc-note">□ 근로자의 귀책사유로 회사에 손해를 발생시키거나, 회사 자산을 무단으로 취득한 경우 관련 법령의 규정에 의한 민·형사상 책임을 진다.</p>
+          </li>
+          <li><b>근로계약서 교부</b>
+            <p class="mc-note">□ 회사는 근로계약을 체결함과 동시에 본 계약서 사본을 근로자의 교부 요구와 관계없이 근로자에게 교부한다. (근로기준법 제17조)</p>
+          </li>
+        </ol>
+      </div>
+      <div class="mc-page">
+        <ol class="mc-list" start="9">
+          <li><b>사 직</b>
+            <p class="mc-note">□ 근로자가 개인적인 사유로 사직하고자 하는 경우에는 30일 전에 사직원을 작성, 제출하여야 한다.</p>
+            <p class="mc-note">□ 사직원 제출 30일 이내 대체 인력이 확보된 때에는 자동적으로 사직 처리가 되지만, 확보되지 않았을 경우 30일간 업무 공백 최소화를 위해 노력해야 하며, 30일간 고용 관계가 유지된다.</p>
+          </li>
+          <li><b>기 타</b>
+            <p class="mc-note">□ 본 계약에 정함이 없는 사항은 관련 법령 및 당시 취업규칙, 인사 규정이 정하는 바에 따른다.</p>
+          </li>
+        </ol>
+        <p class="mc-agree">본인은 상기 내용에 동의하며, 일체의 이의 제기가 없음을 확인합니다.</p>
+        <p class="mc-date">${date3(c.signedAt ? dateStringFor(new Date(c.signedAt)) : todayDateString())}</p>
+        <table class="mc-parties">
+          <thead><tr><th>회 사</th><th>근 로 자</th></tr></thead>
+          <tbody>
+            <tr><td>□ 사업자번호 : ${esc(f.bizNo)}</td><td>□ 생년월일 : ${esc(f.empBirth)}</td></tr>
+            <tr><td>□ 주&nbsp;&nbsp;&nbsp;&nbsp; 소 : ${esc(f.bizAddress)}</td><td>□ 주&nbsp;&nbsp;&nbsp;&nbsp; 소 : ${esc(f.empAddress)}</td></tr>
+            <tr><td></td><td>□ 연 락 처 : ${esc(f.empPhone)}</td></tr>
+            <tr><td class="mc-signcell">□ 대 표 자 : ${esc(f.owner)} <span class="mc-in">(인)${sign(c.ownerSign)}</span></td><td class="mc-signcell">□ 성&nbsp;&nbsp;&nbsp;&nbsp; 명 : ${esc(f.empName)} <span class="mc-in">(인)${sign(c.empSign)}</span></td></tr>
+          </tbody>
+        </table>
+        <p class="mc-foot">${c.status === "signed" ? `전자 근로계약 · 서명 ${new Date(c.signedAt).toLocaleString("ko-KR")}` : "작성 중 (서명 전)"}</p>
+      </div>
+    </div>`;
+}
+
+function renderContractModal() {
+  const c = state.contractDraft;
+  if (!c) return "";
+  const f = c.f;
+  const signed = c.status === "signed";
+  const input = (key, label, value, extra = "") =>
+    `<label class="ct-row"><span>${label}</span><input class="field" data-cf="${key}" value="${esc(value ?? "")}" ${extra} /></label>`;
+  const side = signed
+    ? `
+      <p class="staff-title">${esc(f.empName)} · 근로계약서 <span class="pay-tag">서명 완료</span></p>
+      <div class="ct-actions-col">
+        <button type="button" class="btn-primary" data-action="contract-pdf">PDF 받기</button>
+        <button type="button" class="btn-ghost" data-action="new-contract" data-id="${c.empId}">새 계약서 쓰기 (재계약)</button>
+      </div>
+      <p class="sal-note">근로계약서는 근로자에게 꼭 한 부 줘야 해요. PDF로 보내 주세요.</p>
+      <div class="action-row"><button type="button" class="btn-ghost" data-action="close-contract">닫기</button></div>`
+    : `
+      <p class="staff-title">${esc(f.empName)} · 근로계약서</p>
+      <div class="ct-form">
+        <p class="sal-title">수습 기간 <small>없으면 비워 두세요</small></p>
+        ${input("probStart", "수습 시작", f.probStart, 'type="date"')}
+        ${input("probEnd", "수습 끝", f.probEnd, 'type="date"')}
+        <p class="sal-title">근로 계약기간 · 업무</p>
+        ${input("start", "시작일", f.start, 'type="date"')}
+        ${input("end", "끝나는 날", f.end, 'type="date"')}
+        ${input("place", "근무장소", f.place)}
+        ${input("job", "담당업무", f.job)}
+        <p class="sal-title">근무일 및 근로시간 <small>예: 09:00~15:00 · 비우면 쉬는 날</small></p>
+        ${CT_DAYS.map((wd) => {
+          const d = f.days?.[wd];
+          return `<div class="ct-day"><span>${WEEKDAYS[wd]}</span><input class="field" data-cfday="${wd}" value="${d ? `${d.start}~${d.end}` : ""}" placeholder="쉬는 날" aria-label="${WEEKDAYS[wd]}요일 근로시간" /><input class="field ct-break" data-cfbreak="${wd}" value="${d ? d.breakMin : ""}" placeholder="휴게" inputmode="numeric" aria-label="${WEEKDAYS[wd]}요일 휴게(분)"${d ? "" : " disabled"} /><small>분</small></div>`;
+        }).join("")}
+        <label class="ct-row"><span>주휴일</span><select class="field" data-cf="restDay">${CT_DAYS.map((wd) => `<option value="${wd}"${Number(f.restDay) === wd ? " selected" : ""}>${WEEKDAYS[wd]}요일</option>`).join("")}</select></label>
+        <p class="sal-title">급여</p>
+        ${input("wage", "시급", Number(f.wage || 0).toLocaleString(), 'inputmode="numeric" data-money')}
+        ${Number(f.wage) < DEFAULT_WAGE ? `<p class="sal-alert">2026년 최저시급(${DEFAULT_WAGE.toLocaleString()}원)보다 낮아요.</p>` : ""}
+        ${input("payday", "지급일 (매월)", f.payday, 'inputmode="numeric"')}
+        <p class="sal-title">근로자</p>
+        ${input("empBirth", "생년월일", f.empBirth, 'placeholder="2005.03.14"')}
+        ${input("empAddress", "주소", f.empAddress)}
+        ${input("empPhone", "연락처", f.empPhone, 'inputmode="tel"')}
+        <p class="sal-title">회사 <small>한 번 넣으면 다음 계약서에도 채워져요</small></p>
+        ${input("bizNo", "사업자번호", f.bizNo)}
+        ${input("bizAddress", "주소", f.bizAddress)}
+        ${input("owner", "대표자", f.owner)}
+      </div>
+      ${state.error ? `<p class="error">${esc(state.error)}</p>` : ""}
+      <div class="action-row">
+        <button type="button" class="btn-ghost" data-action="close-contract">닫기</button>
+        <button type="button" class="btn-ghost" data-action="save-contract">저장</button>
+        <button type="button" class="btn-primary" data-action="sign-contract">서명 받기</button>
+      </div>`;
+  return `
+    <div class="ps-backdrop ct-backdrop${state.modalEnter ? " enter" : ""}" data-action="close-contract">
+      <div class="ps-dialog" data-stop>
+        <div class="ps-side ct-side">${side}</div>
+        <div class="ps-preview ct-preview">${renderContract(c)}</div>
+      </div>
+    </div>`;
+}
+
+function updateContractDraft(t) {
+  const f = state.contractDraft.f;
+  if (t.dataset.cf) {
+    const k = t.dataset.cf;
+    let v = t.value.trim();
+    if (t.hasAttribute("data-money")) v = Number(v.replace(/[^\d]/g, "")) || 0;
+    if (k === "restDay" || k === "payday") v = Number(v) || 0;
+    if (k === "payday") v = Math.min(31, Math.max(1, v || 5));
+    f[k] = v;
+  }
+  if (t.dataset.cfday) {
+    const wd = t.dataset.cfday;
+    const range = t.value.trim() ? parseRange(t.value) : null;
+    f.days = { ...f.days };
+    if (!t.value.trim()) delete f.days[wd];
+    else if (range) f.days[wd] = { start: range.start, end: range.end, breakMin: lawBreak(spanMin(range.start, range.end)) };
+    // 주휴일이 근무일이 되면 쉬는 날로 옮긴다
+    if (f.days[f.restDay]) f.restDay = pickRestDay(f.days);
+  }
+  if (t.dataset.cfbreak && f.days?.[t.dataset.cfbreak]) f.days[t.dataset.cfbreak].breakMin = Math.max(0, Number(t.value) || 0);
+}
+function saveContractDraft(c) {
+  const list = (store.contracts ?? []).filter((x) => x.id !== c.id);
+  store.contracts = [...list, structuredClone(c)];
+  store.settings = { ...store.settings, biz: { ...(store.settings?.biz ?? {}), bizNo: c.f.bizNo, address: c.f.bizAddress, owner: c.f.owner } };
+  save();
+}
+function contractProblem(f) {
+  if (!f.start) return "근로 계약기간 시작일을 넣어주세요.";
+  if (!f.owner) return "대표자 이름을 넣어주세요.";
+  if (!Number(f.wage)) return "시급을 넣어주세요.";
+  if (!Object.keys(f.days ?? {}).length) return "근무 요일과 시간을 넣어주세요.";
+  if (f.end && f.end < f.start) return "끝나는 날이 시작일보다 빨라요.";
+  return "";
+}
+function cleanContracts(list) {
+  // 시작할 때(저장된 데이터 불러올 때)도 불려서, 아래쪽 날짜 검사 함수 대신 여기서 확인
+  const isIso = (v) => typeof v === "string" && v.length < 40 && !Number.isNaN(Date.parse(v));
+  const sign = (v) => (typeof v === "string" && v.startsWith("data:image/png;base64,") && v.length < 300000 ? v : null);
+  return (Array.isArray(list) ? list : [])
+    .filter((c) => c && safeId(c.id) && safeId(c.empId) && c.f && typeof c.f === "object")
+    .map((c) => ({
+      id: c.id,
+      empId: c.empId,
+      createdAt: isIso(c.createdAt) ? c.createdAt : new Date().toISOString(),
+      status: c.status === "signed" ? "signed" : "draft",
+      signedAt: isIso(c.signedAt) ? c.signedAt : null,
+      f: JSON.parse(JSON.stringify(c.f, (k, v) => (typeof v === "string" ? v.slice(0, 200) : v))),
+      empSign: sign(c.empSign),
+      ownerSign: sign(c.ownerSign),
+    }));
+}
+
+async function signContract() {
+  const c = state.contractDraft;
+  const problem = contractProblem(c.f);
+  if (problem) {
+    state.error = problem;
+    render();
+    return;
+  }
+  state.error = "";
+  saveContractDraft(c);
+  const empSign = await signPad({
+    title: `근로자 서명 · ${c.f.empName}`,
+    message: "계약서 내용을 직원이 직접 읽어 보게 하고, 직원이 서명해요.",
+    check: "근로계약서 내용을 확인했고, 계약서 사본을 받는 것에 동의해요.",
+  });
+  if (!empSign) return;
+  const ownerSign = await signPad({
+    title: `대표자 서명 · ${c.f.owner}`,
+    message: "대표자가 서명해요. 이 서명은 다음 계약서에도 쓸 수 있게 기억해요.",
+    saved: store.settings?.ownerSign ?? null,
+  });
+  if (!ownerSign) return;
+  Object.assign(c, { empSign, ownerSign, status: "signed", signedAt: new Date().toISOString() });
+  store.settings = { ...store.settings, ownerSign };
+  saveContractDraft(c);
+  state.contractDraft = structuredClone(c);
+  render();
+  showToast(`${c.f.empName}님 근로계약서 서명이 끝났어요. PDF로 꼭 한 부 보내 주세요`, "ok");
+}
+
+// PDF: 종이처럼 A4 두 장
+function contractPdf(button) {
+  const c = state.contractDraft;
+  return withBusy(button, "PDF 만드는 중…", async () => {
+    const [html2canvas, jsPDF] = await Promise.all([loadLib("html2canvas"), loadLib("jspdf")]);
+    await document.fonts.ready;
+    const stage = document.createElement("div");
+    stage.className = "ps-stage";
+    stage.innerHTML = renderContract(c);
+    document.body.appendChild(stage);
+    try {
+      const pdf = new jsPDF({ unit: "mm", format: "a4" });
+      const pages = [...stage.querySelectorAll(".mc-page")];
+      for (const [i, page] of pages.entries()) {
+        const canvas = await html2canvas(page, { scale: 2, backgroundColor: "#ffffff" });
+        if (i > 0) pdf.addPage();
+        pdf.addImage(canvas.toDataURL("image/jpeg", 0.95), "JPEG", 0, 0, 210, 297);
+      }
+      pdf.save(`${c.f.empName} 근로계약서 ${c.f.start}.pdf`);
+    } finally {
+      stage.remove();
+    }
+  });
+}
+
+// 서명 칸 (손가락·마우스로 서명 → PNG)
+function signPad({ title, message, check, saved }) {
+  return new Promise((resolve) => {
+    const back = document.createElement("div");
+    back.className = "sign-back";
+    back.innerHTML = `
+      <div class="sign-box" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+        <p class="sign-title">${esc(title)}</p>
+        <p class="sign-msg">${esc(message)}</p>
+        ${check ? `<label class="agree sign-check"><input type="checkbox" class="sign-agree" /> <span>${esc(check)}</span></label>` : ""}
+        <div class="sign-pad"><canvas aria-label="서명 칸"></canvas><span class="sign-hint">여기에 서명해주세요</span></div>
+        <div class="sign-actions">
+          ${saved ? `<button type="button" class="btn-ghost" data-sign="saved">저장된 서명 쓰기</button>` : ""}
+          <button type="button" class="btn-ghost" data-sign="clear">다시 쓰기</button>
+          <button type="button" class="btn-ghost" data-sign="cancel">취소</button>
+          <button type="button" class="btn-primary" data-sign="ok">확인</button>
+        </div>
+        <p class="sign-err" hidden></p>
+      </div>`;
+    document.body.appendChild(back);
+    const canvas = back.querySelector("canvas");
+    const pad = back.querySelector(".sign-pad");
+    const ratio = window.devicePixelRatio || 1;
+    const w = pad.clientWidth;
+    const h = Math.round(w * 0.38);
+    canvas.width = w * ratio;
+    canvas.height = h * ratio;
+    canvas.style.height = `${h}px`;
+    const ctx = canvas.getContext("2d");
+    ctx.scale(ratio, ratio);
+    ctx.lineWidth = 2.6;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "#111111";
+    let drawing = false;
+    let strokes = 0;
+    const pos = (e) => {
+      const r = canvas.getBoundingClientRect();
+      return [e.clientX - r.left, e.clientY - r.top];
+    };
+    canvas.addEventListener("pointerdown", (e) => {
+      drawing = true;
+      canvas.setPointerCapture(e.pointerId);
+      ctx.beginPath();
+      ctx.moveTo(...pos(e));
+      pad.classList.add("on");
+    });
+    canvas.addEventListener("pointermove", (e) => {
+      if (!drawing) return;
+      ctx.lineTo(...pos(e));
+      ctx.stroke();
+      strokes += 1;
+    });
+    const stop = () => (drawing = false);
+    canvas.addEventListener("pointerup", stop);
+    canvas.addEventListener("pointercancel", stop);
+    const err = back.querySelector(".sign-err");
+    const close = (v) => {
+      back.remove();
+      resolve(v);
+    };
+    back.addEventListener("click", (e) => {
+      const k = e.target.closest("[data-sign]")?.dataset.sign;
+      if (k === "cancel") close(null);
+      if (k === "clear") {
+        ctx.clearRect(0, 0, w, h);
+        strokes = 0;
+        pad.classList.remove("on");
+      }
+      if (k === "saved") close(saved);
+      if (k === "ok") {
+        if (check && !back.querySelector(".sign-agree").checked) {
+          err.textContent = "내용을 확인했다는 칸에 체크해주세요.";
+          err.hidden = false;
+          return;
+        }
+        if (strokes < 5) {
+          err.textContent = "서명 칸에 서명해주세요.";
+          err.hidden = false;
+          return;
+        }
+        close(canvas.toDataURL("image/png"));
+      }
+    });
+  });
+}
+
 // 직원용 달력으로 가는 버튼 (새 탭)
 const staffCalLink = (cls = "") =>
   `<a${cls ? ` class="${cls}"` : ""} href="${esc(staffUrl())}" target="_blank" rel="noopener" title="매장 데스크 기기에서 여는 직원용 달력">직원용 달력 ↗</a>`;
@@ -1353,7 +1754,8 @@ function renderEmployeesMobile() {
     "employees",
     `
     ${mHead(`직원 <span class="m-count">${store.employees.length}명</span>`, `<button type="button" class="m-add" data-action="open-sheet" data-sheet="add-emp">+ 추가</button>`)}
-    <div class="m-list">${list || `<p class="m-empty">아직 직원이 없어요.<br />오른쪽 위 <b>+ 추가</b>로 등록해주세요.</p>`}</div>`,
+    <div class="m-list">${list || `<p class="m-empty">아직 직원이 없어요.<br />오른쪽 위 <b>+ 추가</b>로 등록해주세요.</p>`}</div>
+    ${renderContractModal()}`,
   );
 }
 
@@ -1386,6 +1788,7 @@ function renderEmpSheet(e) {
           : `<button type="button" class="m-toggle${isManager(e) ? " on" : ""}" data-action="toggle-role" data-id="${e.id}">${isManager(e) ? "매니저" : "알바"}</button>`
       }
     </div>
+    <button type="button" class="m-contract${latestContract(e.id)?.status === "signed" ? " on" : ""}" data-action="open-contract" data-id="${e.id}">${latestContract(e.id)?.status === "signed" ? "근로계약서 ✓ 서명 완료" : latestContract(e.id) ? "근로계약서 이어서 쓰기" : "근로계약서 쓰기"}</button>
     <p class="sheet-note">매니저는 근무표에만 나오고 출근·급여 계산에서 빠져요.</p>
     <div class="sheet-actions">
       <button type="button" class="btn-ghost danger-ghost" data-action="remove-employee" data-id="${e.id}">삭제</button>
@@ -3360,6 +3763,7 @@ const TOURS = {
           { sel: "table.schedule tbody tr:first-child .day-cell", title: "요일별 근무 시간", text: "칸에 <b>7-12</b>, <b>18-2230</b>처럼 입력하면 그 요일 고정 근무 시간이 저장돼요. 비우면 쉬는 날이에요." },
           { sel: "table.schedule tbody tr:first-child .wage-cell", title: "시급", text: "직원마다 시급을 고쳐요. 급여 계산에 바로 반영돼요." },
           { sel: "table.schedule tbody tr:first-child [data-action=toggle-active]", title: "재직중 · 비활성", text: "그만둔 직원은 <b>비활성</b>으로 바꿔요. 기록은 남고, 달력과 근무표에서만 빠져요." },
+          { sel: "table.schedule tbody tr:first-child [data-action=open-contract]", title: "근로계약서", text: "메가MGC커피 시간제 근로계약서 양식 그대로 써요. 직원 정보로 미리 채워지고, 매장에서 화면에 직원과 대표자가 서명하면 PDF로 받을 수 있어요." },
           { sel: "table.schedule tbody tr:first-child [data-action=toggle-role]", title: "알바 · 매니저", text: "매니저로 바꾸면 목록 맨 위로 와요. 매니저는 출근을 안 찍어도 근무표대로 급여에 나와요." },
         ]
       : [
@@ -3722,6 +4126,7 @@ window.addEventListener("hashchange", () => {
   state.slotEdit = null;
   state.helpOpen = {};
   state.payTab = null;
+  state.contractDraft = null;
   render();
 });
 
@@ -4148,6 +4553,35 @@ app.addEventListener("click", (e) => {
       }
       return;
     }
+    case "open-contract": {
+      const emp = employeeById(id);
+      const last = latestContract(id);
+      state.sheet = null;
+      state.error = "";
+      state.modalEnter = true;
+      state.contractDraft = last ? structuredClone(last) : newContract(emp);
+      break;
+    }
+    case "new-contract":
+      state.error = "";
+      state.contractDraft = newContract(employeeById(id));
+      break;
+    case "close-contract":
+      state.contractDraft = null;
+      state.error = "";
+      break;
+    case "save-contract": {
+      const problem = contractProblem(state.contractDraft.f);
+      saveContractDraft(state.contractDraft);
+      showToast(problem ? `저장했어요. 서명 전에 확인: ${problem}` : "계약서를 저장했어요", "ok");
+      break;
+    }
+    case "sign-contract":
+      signContract();
+      return;
+    case "contract-pdf":
+      contractPdf(el).catch((err) => uiAlert(err.message));
+      return;
     case "start-tour":
       startTour(route().name);
       return;
@@ -4356,6 +4790,12 @@ app.addEventListener("change", (e) => {
     render();
     return;
   }
+  if (state.contractDraft && (t.dataset.cf || t.dataset.cfday || t.dataset.cfbreak)) {
+    state.error = "";
+    updateContractDraft(t);
+    render();
+    return;
+  }
   if (t.dataset.setting) {
     store.settings = { ...store.settings, [t.dataset.setting]: t.value };
     save();
@@ -4524,6 +4964,8 @@ function flattenStore(withPrivate) {
   if (withPrivate) {
     const { scheduleMeta, settings, allowances, scheduleDraft, absent } = store;
     out["private/main"] = JSON.stringify({ scheduleMeta, settings, allowances, scheduleDraft, absent });
+    // 근로계약서는 서명 그림이 들어가 크기가 커서 한 장씩 따로
+    for (const c of store.contracts ?? []) out[`private/contracts/${c.id}`] = JSON.stringify(c);
   }
   return out;
 }
@@ -4543,6 +4985,7 @@ function flattenRemote() {
   if (remote.privLoaded) {
     const priv = remote.priv ?? {};
     walk("private/employees", priv.employees);
+    walk("private/contracts", priv.contracts);
     if (priv.main) out["private/main"] = priv.main;
   }
   return out;
@@ -4603,7 +5046,7 @@ function cleanStore(data) {
   for (const [k, v] of Object.entries(data.absent && typeof data.absent === "object" ? data.absent : {})) {
     if (v && /^[A-Za-z0-9_-]{1,64}\|\d{4}-\d{2}-\d{2}$/.test(k)) absent[k] = true;
   }
-  return { ...data, employees, records, shifts, absent };
+  return { ...data, employees, records, shifts, absent, contracts: cleanContracts(data.contracts) };
 }
 
 function parse(json, fallback) {
@@ -4638,6 +5081,7 @@ function storeFromRemote() {
     allowances: main.allowances,
     scheduleDraft: main.scheduleDraft,
     absent: parse(pub.absent, null) ?? main.absent,
+    contracts: priv ? Object.values(priv.contracts ?? {}).map((json) => parse(json, null)).filter(Boolean) : store.contracts,
     // 이미 정리된 데이터이므로 예전 데이터 정리는 다시 하지 않는다
     filledFrom: FILL_FROM,
     autoMarked: true,
