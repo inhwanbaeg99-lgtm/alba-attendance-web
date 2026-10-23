@@ -918,6 +918,7 @@ const dot = (d) => (d ? d.replaceAll("-", ".") : "");
 // 직원·지원자에게 보내는 주소는 github 대신 Firebase 무료 주소 (deploy-firebase.sh 로 올림)
 const SITE = "https://mgc-attendance.web.app/";
 const payUrl = () => `${SITE}pay`;
+const workUrl = () => `${SITE}work`;
 
 const resumeUrl = () => `${SITE}resume`; // 매장 이름은 이력서 페이지에 들어 있어요
 function renderMyPage() {
@@ -931,7 +932,10 @@ function renderMyPage() {
       </section>
 
       <section class="me-card">
-        <h2>직원 링크 · 근무 상세와 급여명세서</h2>
+        <h2>직원 링크</h2>
+        <p class="me-link-label">근무 상세</p>
+        <div class="me-link"><span>${esc(workUrl())}</span><button type="button" class="pill" data-action="copy-work-link">주소 복사</button></div>
+        <p class="me-link-label">급여명세서</p>
         <div class="me-link"><span>${esc(payUrl())}</span><button type="button" class="pill" data-action="copy-pay-link">주소 복사</button></div>
         <ul class="me-pins">
           ${
@@ -1084,7 +1088,9 @@ async function newSlipPin(empId) {
 // ---------- 직원: 내 근무 · 급여명세서 (#/my, #/work, #/pay) ----------
 // 한 화면에 탭 두 개 (왼쪽 근무 상세가 먼저). 같은 PIN 으로 연다. 근무 상세는 public/slips/{직원}/w-{달} 에 잠겨 있다.
 const paySessionKey = (empId) => `mgc-pay:${empId}`;
-const payTab = () => state.payTab ?? (location.hash === "#/pay" ? "pay" : "work");
+// /work 는 근무 상세만, /pay 는 급여명세서만 (탭 없이). 예전 주소(#/my)는 둘 다 탭으로
+const pageTab = () => ({ pay: "pay", work: "work" })[document.body.dataset.page] ?? null;
+const payTab = () => pageTab() ?? state.payTab ?? (location.hash === "#/pay" ? "pay" : "work");
 const workMonths = (empId) => Object.keys(slipsOf(empId)).filter((k) => /^w-\d{4}-\d{2}$/.test(k)).map((k) => k.slice(2)).sort().reverse();
 const tabMonths = (empId, tab) => (tab === "work" ? workMonths(empId) : slipMonths(empId));
 const slipKey = (tab, ym) => (tab === "work" ? `w-${ym}` : ym);
@@ -1126,7 +1132,7 @@ function renderPayPage() {
   else if (!v) {
     body = `
       <p class="pay-store">${esc(storeName())}</p>
-      <p class="pay-sub">내 근무 및 급여명세서</p>
+      <p class="pay-sub">${{ pay: "내 급여명세서", work: "내 근무 상세" }[pageTab()] ?? "내 근무 및 급여명세서"}</p>
       ${
         names.length
           ? `<ul class="pay-names">${names.map((e) => `<li><button type="button" data-action="pay-open" data-id="${e.id}">${esc(e.name)}<span class="chev" aria-hidden="true">${ICON_CHEVRON}</span></button></li>`).join("")}</ul>
@@ -1151,10 +1157,14 @@ function renderPayPage() {
         : (got?.error ?? `<p class="sub pay-wait">여는 중이에요…</p>`);
     body = `
       <div class="pay-who"><button type="button" class="pay-back-btn" data-action="pay-close" aria-label="이전">${ICON_BACK}</button><b>${esc(emp?.name ?? "")}님</b></div>
-      <div class="pay-tabs" role="tablist">
+      ${
+        pageTab()
+          ? ""
+          : `<div class="pay-tabs" role="tablist">
         <button type="button" role="tab" class="${tab === "work" ? "on" : ""}" aria-selected="${tab === "work"}" data-action="pay-tab" data-tab="work">근무 상세</button>
         <button type="button" role="tab" class="${tab === "pay" ? "on" : ""}" aria-selected="${tab === "pay"}" data-action="pay-tab" data-tab="pay">급여명세서</button>
-      </div>
+      </div>`
+      }
       ${
         ym
           ? `<div class="pay-month">
@@ -3349,7 +3359,7 @@ async function scheduleShare(button) {
 // 단계: { sel: 가리킬 칸, title, text, scene?: 그 단계에서 잠깐 펼쳐 보일 화면 }
 const TOURS = {
   me: () => [
-    { sel: ".me-card:nth-of-type(2) .me-link", title: "직원 링크", text: "이 주소를 <b>단톡방 공지</b>에 올려 두세요. 직원이 눌러서 자기 PIN으로 자기 근무 상세와 급여명세서만 봐요." },
+    { sel: ".me-card:nth-of-type(2) .me-link", title: "직원 링크", text: "<b>근무 상세</b>와 <b>급여명세서</b> 주소가 따로 있어요. 둘 다 <b>단톡방 공지</b>에 올려 두면, 직원이 같은 PIN으로 자기 것만 봐요." },
     { sel: ".me-pins", title: "직원별 PIN", text: "직원마다 <b>PIN 6자리가 자동으로</b> 만들어져요. 개인 톡으로 알려 주세요. 근무 상세는 <b>다음 달 1일</b>, 명세서는 <b>다음 달 5일</b>에 자동으로 올라가요. 잃어버렸으면 <b>새 PIN</b>으로 바꿔요." },
     { sel: ".me-card:nth-of-type(3) .me-link", title: "이력서 양식", text: "지원자에게 이 주소를 문자로 보내면, 휴대폰으로 써서 A4 이력서 사진을 문자로 보내 줘요. 종이 양식은 열어서 ••• → 빈 양식 인쇄." },
   ],
@@ -3638,7 +3648,7 @@ function route() {
   const day = hash.match(/^\/day\/(\d{4}-\d{2}-\d{2})$/);
   if (day) return { name: "day", date: day[1] };
   // /pay/ 주소(카톡 미리보기 제목 "급여 MGC 근무")는 처음부터 내 근무 · 급여명세서 화면
-  if (!ADMIN_SITE) return { name: document.body.dataset.page === "pay" || ["/my", "/pay", "/work"].includes(hash) ? "pay" : "home" };
+  if (!ADMIN_SITE) return { name: pageTab() || ["/my", "/pay", "/work"].includes(hash) ? "pay" : "home" };
   const page = { "/records": "records", "/schedule": "schedule", "/calendar": "calendar", "/me": "me" }[hash];
   return { name: page ?? "employees" };
 }
@@ -4104,9 +4114,15 @@ app.addEventListener("click", (e) => {
       draftWeekly(employeeById(state.slotEdit.empId), state.slotEdit.wd, null);
       state.slotEdit = null;
       break;
+    case "copy-work-link":
+      navigator.clipboard?.writeText(workUrl()).then(
+        () => showToast("근무 상세 주소를 복사했어요", "ok"),
+        () => showToast("복사하지 못했어요. 주소를 길게 눌러 복사해주세요."),
+      );
+      return;
     case "copy-pay-link":
       navigator.clipboard?.writeText(payUrl()).then(
-        () => showToast("직원 링크를 복사했어요. 단톡방에 붙여 넣어 주세요", "ok"),
+        () => showToast("급여명세서 주소를 복사했어요", "ok"),
         () => showToast("복사하지 못했어요. 주소를 길게 눌러 복사해주세요."),
       );
       return;
