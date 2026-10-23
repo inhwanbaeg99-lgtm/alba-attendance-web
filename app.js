@@ -1138,11 +1138,11 @@ function renderPayPage() {
         names.length
           ? `${(() => {
               const list = (arr) => `<ul class="pay-names">${arr.map((e) => `<li><button type="button" data-action="pay-open" data-id="${e.id}">${esc(e.name)}<span class="chev" aria-hidden="true">${ICON_CHEVRON}</span></button></li>`).join("")}</ul>`;
-              // 급여명세서: 직원(매니저)은 위, 알바는 아래 칸으로 나눠서
+              // 급여명세서: 알바는 위, 직원(매니저)은 아래 칸으로 나눠서
               const staff = names.filter(isManager);
               const alba = names.filter((e) => !isManager(e));
               return pageTab() === "pay" && staff.length
-                ? `<p class="pay-group">직원</p>${list(staff)}${alba.length ? `<p class="pay-group">알바</p>${list(alba)}` : ""}`
+                ? `${alba.length ? `<p class="pay-group">알바</p>${list(alba)}` : ""}<p class="pay-group">직원</p>${list(staff)}`
                 : list(names);
             })()}
             <p class="pay-hint">본인 이름을 누르고 PIN을 입력해주세요.</p>`
