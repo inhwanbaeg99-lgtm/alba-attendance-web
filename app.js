@@ -1136,7 +1136,15 @@ function renderPayPage() {
       <p class="pay-sub">${{ pay: "내 급여명세서", work: "내 근무 상세" }[pageTab()] ?? "내 근무 및 급여명세서"}</p>
       ${
         names.length
-          ? `<ul class="pay-names">${names.map((e) => `<li><button type="button" data-action="pay-open" data-id="${e.id}">${esc(e.name)}<span class="chev" aria-hidden="true">${ICON_CHEVRON}</span></button></li>`).join("")}</ul>
+          ? `${(() => {
+              const list = (arr) => `<ul class="pay-names">${arr.map((e) => `<li><button type="button" data-action="pay-open" data-id="${e.id}">${esc(e.name)}<span class="chev" aria-hidden="true">${ICON_CHEVRON}</span></button></li>`).join("")}</ul>`;
+              // 급여명세서: 직원(매니저)은 위, 알바는 아래 칸으로 나눠서
+              const staff = names.filter(isManager);
+              const alba = names.filter((e) => !isManager(e));
+              return pageTab() === "pay" && staff.length
+                ? `<p class="pay-group">직원</p>${list(staff)}${alba.length ? `<p class="pay-group">알바</p>${list(alba)}` : ""}`
+                : list(names);
+            })()}
             <p class="pay-hint">본인 이름을 누르고 PIN을 입력해주세요.</p>`
           : `<p class="pay-hint">아직 공개된 내용이 없어요. 사장님께 PIN을 받았는지 확인해주세요.</p>`
       }`;

@@ -5406,3 +5406,13 @@ td.name {
   width: 16px;
   height: 16px;
 }
+/* 급여명세서 링크: 직원 · 알바 칸 제목 */
+.pay-group {
+  margin: 20px 2px 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-sub);
+}
+.pay-group + .pay-names {
+  margin-top: 8px;
+}
