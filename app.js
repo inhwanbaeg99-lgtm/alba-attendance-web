@@ -1141,6 +1141,7 @@ function renderPayPage() {
               // 급여명세서: 알바는 위, 직원(매니저)은 아래 칸으로 나눠서
               const staff = names.filter(isManager);
               const alba = names.filter((e) => !isManager(e));
+              if (pageTab() === "work") return `<p class="pay-group">알바</p>${list(names)}`; // 근무 상세는 알바만
               return pageTab() === "pay" && staff.length
                 ? `${alba.length ? `<p class="pay-group">알바</p>${list(alba)}` : ""}<p class="pay-group">직원</p>${list(staff)}`
                 : list(names);
