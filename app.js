@@ -2786,8 +2786,6 @@ function exportLedger(button) {
       sumText: { font: { bold: true }, fill: { patternType: "solid", fgColor: { rgb: "FFF3F6F5" } }, border },
       note: { font: { color: { rgb: "B45309" } }, border },
       mid: { alignment: { horizontal: "center" }, border },
-      sun: { font: { color: { rgb: "D64545" } }, alignment: { horizontal: "center" }, border },
-      headSun: { font: { bold: true, color: { rgb: "D64545" } }, fill: { patternType: "solid", fgColor: { rgb: "FFE2F4F2" } }, alignment: { horizontal: "center", wrapText: true }, border },
     };
     const cell = (v, s) => ({ v: v ?? "", t: typeof v === "number" ? "n" : "s", s });
     // 시트 만들기: 제목·기간 줄 + 표. widths = 열 너비(글자 수)
@@ -2865,11 +2863,11 @@ function exportLedger(button) {
       ["이름", ...days.map((d) => `${Number(d.slice(8))}\n${WEEKDAYS[weekdayOf(d)]}`), "일수", "시간"],
       ts.map((r) => [
         cell(r.manager ? `${r.emp.name} (매니저)` : r.emp.name, st.name),
-        ...r.cells.map((h, i) => cell(h ? Number(h.toFixed(2)) : "", weekdayOf(days[i]) === 0 ? st.sun : st.mid)),
+        ...r.cells.map((h) => cell(h ? Number(h.toFixed(2)) : "", st.mid)),
         cell(r.cells.filter((h) => h).length, st.num), cell(Number(r.total.toFixed(2)), st.dec),
       ]),
       [15, ...days.map(() => 4.5), 6, 7],
-      [st.head, ...days.map((d) => (weekdayOf(d) === 0 ? st.headSun : st.head)), st.head, st.head],
+      [st.head, ...days.map(() => st.head), st.head, st.head],
     );
 
     // 3. 주휴수당 내역
