@@ -1002,7 +1002,10 @@ async function publishSlips(onlyId = null) {
 }
 // 시작할 때 save() 가 먼저 불릴 수 있어서 var · function 으로 (선언 전에 불러도 되게)
 var slipTimer = null;
+// 직원 링크(/work · /pay) 페이지를 당분간 안 써서 자동 올리기도 멈춘다. 다시 쓰려면 SLIPS_ON 을 true 로.
+var SLIPS_ON = false;
 function queueSlipPublish() {
+  if (!SLIPS_ON) return;
   clearTimeout(slipTimer);
   slipTimer = setTimeout(() => publishSlips(), 4000);
 }
