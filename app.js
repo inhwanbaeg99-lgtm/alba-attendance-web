@@ -2848,15 +2848,17 @@ function exportLedger(button) {
 
     // 2. 날짜별 근무시간 (출근 기록 기준)
     const ts = timesheet(month, "").rows.filter((r) => !isManager(r.emp));
-    // 매니저는 출근을 안 찍으므로 근무표대로 (출근 기록이 있으면 기록으로) — 알바 아래에
+    // 매니저는 출근을 안 찍으므로 근무표대로 (출근 기록이 있으면 기록으로) — 맨 위에
+    const mgrRows = [];
     for (const emp of store.employees.filter((e) => e.active && isManager(e))) {
       const recs = monthRecords(month, emp.id);
       const cells = days.map((d) => {
         const mine = recs.filter((x) => x.date === d && x.clockOut);
         return mine.length ? mine.reduce((a, x) => a + hoursBetween(x.clockIn, x.clockOut), 0) : plannedHours(emp, [d]);
       });
-      ts.push({ emp, cells, total: cells.reduce((a, h) => a + h, 0), manager: true });
+      mgrRows.push({ emp, cells, total: cells.reduce((a, h) => a + h, 0), manager: true });
     }
+    ts.unshift(...mgrRows);
     const ws2 = sheet(
       `${store_} ${y}년 ${m}월 날짜별 근무시간`,
       "단위: 시간   ·   출근 기록 기준 (매니저는 근무표 기준)",
