@@ -5704,3 +5704,16 @@ body.sc-drag-resize * {
 .sched-solo #sched-sheet td.sc-landed {
   animation: sc-land 0.6s ease-out;
 }
+.sc-preview.blocked {
+  opacity: 0.55;
+  box-shadow: 0 0 0 2px var(--red), 0 8px 20px rgb(0 0 0 / 0.12);
+}
+.sc-preview.blocked span {
+  background: var(--red);
+  color: #fff;
+}
+
+/* 알림이 아래 이름 줄을 가려도 끌 수 있게 */
+.toast {
+  pointer-events: none;
+}

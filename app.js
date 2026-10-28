@@ -3351,7 +3351,9 @@ function promoteDueTrainees() {
   if (due.length) save();
 }
 
+var schedColMemo;
 function scheduleLayout() {
+  schedColMemo = schedColMemo ?? {};
   // 같은 시간에 시작하는 사람의 칸 순서. 직원 목록 순서를 바꿔도 근무표 배치는 그대로 두려고 따로 기억한다
   const ids = [...(Array.isArray(store.scheduleMeta?.order) ? store.scheduleMeta.order : []), ...store.employees.map((e) => e.id)];
   const order = new Map([...new Set(ids)].map((id, i) => [id, i]));
@@ -3361,13 +3363,25 @@ function scheduleLayout() {
       .filter(({ e, w }) => e.active && w)
       .map(({ e, w }) => ({ emp: e, start: toMin(w.start), end: toMin(w.end) }))
       .sort((a, b) => a.start - b.start || order.get(a.emp.id) - order.get(b.emp.id));
+    // 한 번 정해진 사람의 줄(칸) 자리는 그대로 둔다 (누구를 넣거나 빼도 다른 이름이 옆 줄로 옮겨 다니지 않게)
+    const memo = (schedColMemo[wd] = schedColMemo[wd] ?? {});
     const cols = [];
-    for (const p of people) {
-      const col = cols.find((c) => c[c.length - 1].end <= p.start);
-      if (col) col.push(p);
-      else cols.push([p]);
+    const fits = (c, p) => c.every((q) => q.end <= p.start || q.start >= p.end);
+    // 자리가 정해진 사람 먼저, 새로 들어온 사람은 남는 자리에
+    const known = people.filter((p) => memo[p.emp.id] != null);
+    const fresh = people.filter((p) => memo[p.emp.id] == null);
+    for (const p of [...known, ...fresh]) {
+      const pref = memo[p.emp.id];
+      while (pref != null && cols.length <= pref) cols.push([]);
+      let ci = pref != null && fits(cols[pref], p) ? pref : cols.findIndex((c) => fits(c, p));
+      if (ci < 0) ci = cols.push([]) - 1;
+      cols[ci].push(p);
     }
+    for (const c of cols) c.sort((a, b) => a.start - b.start);
+    // 빈 줄은 정리 (최소 2줄)
+    for (let i = cols.length - 1; i >= 0 && cols.length > 2; i--) if (!cols[i].length) cols.splice(i, 1);
     while (cols.length < 2) cols.push([]);
+    cols.forEach((c, i) => c.forEach((p) => (memo[p.emp.id] = i)));
     return { wd, cols };
   });
 
@@ -4038,10 +4052,14 @@ function schedDragRange(target, clientY) {
   const tStart = Number(target.dataset.start);
   let start = d.kind === "add" ? tStart : Math.max(0, tStart - d.offset);
   let end = Math.min(d.kind === "add" ? Math.floor(tStart / 60) * 60 + 60 : start + d.dur, 24 * 60 - 1);
+  // 그 요일에 이미 근무가 있으면: 바로 붙거나 겹칠 때만 이어 붙이고, 떨어진 칸이면 넣지 않는다
   const had = d.kind === "move" && wd === d.wd ? null : effWeekly(emp)[wd];
   if (had) {
-    start = Math.min(start, toMin(had.start));
-    end = Math.max(end, toMin(had.end));
+    const hs = toMin(had.start);
+    const he = toMin(had.end);
+    if (start > he || end < hs) return { wd, start, end, blocked: true };
+    start = Math.min(start, hs);
+    end = Math.max(end, he);
   }
   return { wd, start, end };
 }
@@ -4095,7 +4113,8 @@ function schedShowPreview(target) {
   pv.style.width = `${c.width}px`;
   pv.style.top = `${top - b.top + 1}px`;
   pv.style.height = `${Math.max(16, bottom - top - 2)}px`;
-  pv.querySelector("span").textContent = `${padTime(d.range.start)} ~ ${padTime(d.range.end)}`;
+  pv.querySelector("span").textContent = d.range.blocked ? `${WEEKDAYS[d.range.wd]}요일은 이미 근무가 있어요` : `${padTime(d.range.start)} ~ ${padTime(d.range.end)}`;
+  pv.classList.toggle("blocked", Boolean(d.range.blocked));
   pv.classList.add("on");
 }
 
@@ -4173,6 +4192,11 @@ function schedDragEnd() {
   schedNoClick = true;
   setTimeout(() => (schedNoClick = false), 0);
   const emp = employeeById(d.empId);
+  if (d.range?.blocked) {
+    showToast(`${WEEKDAYS[d.range.wd]}요일은 이미 ${schedName(emp)} 근무가 있어요. 칸 끝을 끌어서 늘려 주세요`);
+    render();
+    return;
+  }
   if (d.kind === "move") draftWeekly(emp, d.wd, null);
   if (d.range && !(d.kind === "move" && d.out)) draftWeekly(emp, d.range.wd, { start: padTime(d.range.start), end: padTime(d.range.end) });
   if (d.kind === "move" && d.out) showToast(`${WEEKDAYS[d.wd]}요일 ${schedName(emp)} 근무를 뺐어요`);
