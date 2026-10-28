@@ -3802,25 +3802,25 @@ const TOURS = {
           { sel: "table.schedule tbody tr:first-child .day-cell", title: "요일별 근무 시간", text: "칸에 <b>7-12</b>, <b>18-2230</b>처럼 입력하면 그 요일 고정 근무 시간이 저장돼요. 비우면 쉬는 날이에요." },
           { sel: "table.schedule tbody tr:first-child .wage-cell", title: "시급", text: "직원마다 시급을 고쳐요. 급여 계산에 바로 반영돼요." },
           { sel: "table.schedule tbody tr:first-child [data-action=toggle-active]", title: "재직중 · 비활성", text: "그만둔 직원은 <b>비활성</b>으로 바꿔요. 기록은 남고, 달력과 근무표에서만 빠져요." },
-          { sel: "table.schedule tbody tr:first-child [data-action=toggle-role]", title: "알바 · 매니저", text: "매니저로 바꾸면 목록 맨 위로 와요. 매니저는 출근을 안 찍어도 근무표대로 급여에 나와요." },
+          { sel: "table.schedule tbody tr:first-child [data-action=toggle-role]", title: "알바 · 매니저", text: "매니저로 바꾸면 목록 맨 위로 오고 <b>월급제(4대보험)</b>가 돼요. 출근을 안 찍어도 근무표대로 급여에 나오고, 월급·공제액은 급여 화면의 <b>명세서</b>에서 넣어요. 근무표와 사진에는 이름 대신 <b>매니저</b>로 나와요." },
         ]
       : [
           { sel: ".m-add", title: "직원 추가", text: "여기를 누르면 직원 추가 창이 열려요." },
           { scene: "addSheet", sel: ".sheet", title: "직원 추가 창", text: "이름과 시급을 넣고 <b>추가</b>를 눌러요." },
           { sel: ".m-list .m-row", title: "직원 누르기", text: "직원을 누르면 정보 창이 열려요." },
-          { scene: "empSheet", sel: ".sheet", title: "직원 정보", text: "요일별 근무 시간, 시급, 재직중·비활성, 알바·매니저를 여기서 바꿔요." },
+          { scene: "empSheet", sel: ".sheet", title: "직원 정보", text: "요일별 근무 시간, 시급, 재직중·비활성, 알바·매니저를 여기서 바꿔요. 매니저는 <b>월급제</b>로 계산돼요." },
         ],
   schedule: (pc) =>
     pc
       ? [
           { sel: ".sc-period", title: "근무표 시작 날짜", text: "이 근무표를 언제부터 쓸지 숫자 8자리로 입력해요(예: 20261101). 저장할 때마다 한 번씩 다시 입력해야 저장돼요." },
-          { sel: ".sched-tray", title: "이름 끌어다 놓기", text: "직원 이름을 표의 칸으로 <b>끌어다 놓으면</b> 그 요일, 그 시각에 1시간이 들어가요. 같은 요일에 또 놓으면 그만큼 이어져요." },
-          { sel: "td.sc-name", title: "근무 칸 끌기", text: "칸의 <b>위·아래 끝</b>을 끌면 시작·끝 시간이 바뀌어요. 칸을 끌면 다른 시간·요일로 옮겨지고, <b>표 밖으로 끌어내면</b> 빠져요." },
-          { scene: "slot", sel: ".sched-panel", title: "눌러서 고치기", text: "칸을 누르면 이 창이 떠요. 22:30처럼 <b>30분 단위</b>는 여기서 고쳐요. <b>근무 삭제</b>로 뺄 수도 있어요." },
+          { sel: ".sched-tray", title: "이름 끌어다 놓기", text: "아래 이름을 표의 칸으로 <b>끌어다 놓으면</b> 그 칸 <b>1시간</b>이 들어가요. 놓을 자리에 미리보기와 시간이 떠요. 그 요일에 이미 근무가 있으면 <b>바로 위·아래 칸</b>에 놓을 때만 이어지고, 떨어진 칸은 빨갛게 막혀요." },
+          { sel: "td.sc-name", title: "근무 칸 끌기", text: "칸의 <b>위·아래 끝</b>을 끌면 시작·끝 시간이 늘거나 줄어요. 칸을 끌면 같은 길이로 다른 시간·요일로 옮겨지고, <b>표 밖이나 아래 이름 줄로 끌어내면</b> 빠져요." },
+          { scene: "slot", sel: ".sched-panel", title: "눌러서 고치기", text: "칸을 누르면 그 옆에 이 창이 떠요. 고치는 근무만 또렷하고 나머지는 옅어져요. 22:30처럼 <b>30분 단위</b>는 여기서 고치고, <b>근무 삭제</b>로 뺄 수도 있어요. 바깥을 누르면 닫혀요." },
           { sel: ".sc-actions [data-action=schedule-temp]", title: "임시저장", text: "고친 내용을 보관만 해요. 직원 화면·달력·근무 기록에는 아직 반영되지 않아요." },
           { sel: ".sc-actions [data-action=schedule-save]", title: "저장", text: "시작 날짜부터 직원 화면, 달력, 근무 기록에 반영돼요." },
           { sel: ".sc-actions [data-action=schedule-share]", title: "카카오톡 전송하기", text: "누르면 근무표를 사진으로 만들어요." },
-          { scene: "schedShare", sel: ".share-box", title: "근무표 사진", text: "이런 사진이 만들어져요. <b>복사하기</b>를 누르고 단톡방에 붙여넣으면 돼요." },
+          { scene: "schedShare", sel: ".share-box", title: "근무표 사진", text: "한 사람 근무가 <b>한 덩어리</b>로, 이름과 시간이 크게 들어간 가로 사진이 만들어져요. <b>복사하기</b>를 누르고 단톡방에 붙여넣으면 돼요." },
         ]
       : [
           { sel: ".m-period", title: "근무표 시작 날짜", text: "이 근무표를 언제부터 쓸지 숫자 8자리로 입력해요. 저장할 때마다 한 번씩 다시 입력해야 저장돼요." },
@@ -3831,7 +3831,7 @@ const TOURS = {
           { scene: "slotAdd", sel: ".sheet", title: "근무자 추가 창", text: "직원을 고르고 시간을 넣은 뒤 <b>완료</b>를 눌러요." },
           { sel: ".m-fold > summary", title: "근무표 한눈에 보기", text: "일주일 근무표 전체를 볼 수 있어요." },
           { sel: ".m-savebar", title: "저장 · 카톡 전송", text: "<b>저장</b>하면 시작 날짜부터 반영돼요. <b>카톡 전송</b>은 근무표를 사진으로 보내요." },
-          { scene: "schedShare", sel: ".share-box", title: "근무표 사진", text: "이런 사진이 만들어져요. <b>카카오톡 전송하기</b>로 단톡방에 보내요." },
+          { scene: "schedShare", sel: ".share-box", title: "근무표 사진", text: "한 사람 근무가 <b>한 덩어리</b>로, 이름과 시간이 크게 들어간 가로 사진이 만들어져요. <b>카카오톡 전송하기</b>로 단톡방에 보내요." },
         ],
   calendar: () => [
     { sel: ".cal-head", title: "달 바꾸기", text: "화살표로 지난달, 다음 달을 봐요." },
@@ -3850,20 +3850,26 @@ const TOURS = {
           { scene: "share", sel: ".share-box img", title: "근무 사진 미리보기", text: "이런 사진이 만들어져요. 날짜별 근무 시간과 출퇴근 시간, 한 달 합계가 들어가요." },
           { scene: "share", sel: ".share-actions", title: "복사하기 · 사진 저장", text: "<b>복사하기</b>를 누르고 카톡 채팅방에 붙여넣으면 사진으로 보내져요. 복사하면 <b>다음 직원으로 자동으로 넘어가서</b> 한 명씩 차례로 보낼 수 있어요." },
           { scene: "emp", sel: [".ts-wrap", ".timesheet"], title: "이 직원 근무 상세", text: "날짜별 근무 시간이에요. 근무표보다 더 일하면 파랑, 덜 일하면 빨강으로 보여요." },
-          { sel: "#r-tax", title: "세금", text: "보통 3.3%를 떼요. 떼지 않으면 <b>공제 안 함</b>으로 바꿔요." },
+          { sel: "#r-tax", title: "세금", text: "<b>알바</b>는 보통 3.3%를 떼요. 떼지 않으면 <b>공제 안 함</b>으로 바꿔요. 매니저(월급제)는 이 설정과 상관없이 입력한 4대보험·근로소득세만 빠져요." },
           { sel: "[data-action=save-xlsx-template]", title: "엑셀 양식 저장", text: "매장에서 쓰는 급여 엑셀 양식을 한 번 저장해 둬요." },
           { sel: "[data-action=fill-template-xlsx]", title: "엑셀로 옮기기", text: "저장한 양식에 이번 달 근무·급여를 채운 엑셀 파일을 만들어요." },
-          { sel: "[data-action=export-ledger]", title: "엑셀 파일", text: "양식 없이 바로 받는 엑셀이에요. <b>급여대장 · 날짜별 근무시간 · 주휴수당 내역</b>이 한 파일에 들어가요." },
-          { sel: ".pay-table", title: "급여 정산", text: "기본급, 주휴수당, 수당, 세금, 실지급액이 계산돼요. 주휴수당에 마우스를 올리면 주별 내역이 보여요." },
+          { sel: "[data-action=export-ledger]", title: "엑셀 파일", text: "양식 없이 바로 받는 엑셀이에요. <b>급여대장(알바) · 직원(4대보험) · 날짜별 근무시간(매니저 맨 위) · 주휴수당 내역</b>이 한 파일에 들어가요." },
+          { sel: ".pay-table", title: "급여 정산", text: "기본급, 주휴수당, 수당, 4대보험, 세금, 실지급액이 계산돼요. 주휴수당에 마우스를 올리면 주별 내역이 보여요. 매니저는 <b>월급</b> 표시와 함께 맨 위에 나와요." },
           { sel: ".pay-table .ps-cell [data-action=open-payslip]", title: "명세서", text: "이름 옆 <b>명세서</b>를 누르면 명세서 창이 열려요." },
           { scene: "payslip", sel: ".ps-allow", title: "수당 입력", text: "특근수당 같은 수당을 이름과 금액으로 넣어요. <b>+ 수당 추가</b>로 여러 개 넣을 수 있어요." },
           { scene: "payslip", sel: ".ps-preview", title: "명세서 미리보기", text: "입력하는 대로 바로 바뀌고, 이 모양 그대로 PDF가 돼요. 직원 링크에도 이 명세서가 올라가요." },
           { scene: "payslip", sel: ".ps-side [data-action=save-payslip]", title: "저장", text: "저장하면 급여 정산과 명세서에 반영돼요." },
+          ...(hasMgr()
+            ? [
+                { scene: "payslipMgr", sel: ".sal-box", title: "매니저 급여 입력", text: "매니저 <b>명세서</b>를 누르면 이 칸이 나와요. 월급·식대와 세무사에게 받은 <b>4대보험·근로소득세</b>를 그대로 넣어요. 한 번 저장하면 <b>다음 달에도 같은 금액</b>이 이어지고, 바뀐 달에만 고치면 돼요." },
+                { scene: "payslipMgr", sel: ".ps-preview", title: "매니저 명세서", text: "월급제 명세서로 만들어져요. 공제액을 아직 안 넣으면 급여 정산에 <b>공제 입력 필요</b>로 보여요." },
+              ]
+            : []),
           { sel: ".section-head [data-action=payslip-pdf-all]", title: "명세서 PDF", text: "직원마다 따로 급여명세서 PDF를 받아요." },
         ]
       : [
           { sel: ".m-month", title: "달 바꾸기", text: "화살표로 지난달 급여를 볼 수 있어요." },
-          { sel: ".m-hero", title: "이번 달 합계", text: "실지급액 합계예요. 오른쪽에서 세금(3.3% / 공제 안 함)을 바꿔요." },
+          { sel: ".m-hero", title: "이번 달 합계", text: "실지급액 합계예요. 오른쪽에서 알바 세금(3.3% / 공제 안 함)을 바꿔요." },
           { sel: ".m-pay", title: "직원 누르기", text: "직원을 누르면 그 사람 급여 내역이 열려요." },
           { scene: "paySheet", sel: ".sheet .m-hero", title: "받을 금액", text: "이 직원이 받을 금액과 기본급, 주휴수당, 세금 내역이에요." },
           { scene: "paySheet", sel: ".sheet .m-share", title: "카카오톡 전송하기", text: "누르면 이 직원의 한 달 근무를 달력 사진으로 만들어요." },
@@ -3871,12 +3877,17 @@ const TOURS = {
           { scene: "share", sel: ".share-actions", title: "카카오톡 전송하기", text: "<b>카카오톡 전송하기</b>를 누르면 공유 창이 열려서 카톡 채팅방을 고르면 돼요. <b>사진 저장</b>으로 앨범에 저장할 수도 있어요." },
           { scene: "paySheet", sel: ".sheet .sheet-actions", title: "수당 · 명세서 / 명세서 PDF", text: "<b>수당 · 명세서</b>에서 수당을 넣고, <b>명세서 PDF</b>로 명세서를 받아요." },
           { scene: "payslip", sel: ".ps-allow", title: "수당 입력", text: "특근수당 같은 수당을 이름과 금액으로 넣고 <b>저장</b>해요." },
+          ...(hasMgr()
+            ? [{ scene: "payslipMgr", sel: ".sal-box", title: "매니저 급여 입력", text: "매니저를 누르고 <b>급여 입력</b>을 누르면 이 칸이 나와요. 월급·식대와 세무사에게 받은 4대보험·근로소득세를 넣으면 다음 달에도 이어져요." }]
+            : []),
           { sel: ".m-fold > summary", title: "날짜별 근무 시간", text: "전체 직원의 날짜별 근무 시간 표예요." },
+          { sel: ".m-btns [data-action=export-ledger]", title: "엑셀 파일", text: "급여대장(알바) · 직원(4대보험) · 날짜별 근무시간 · 주휴수당 내역이 들어간 엑셀을 받아요." },
           { sel: ".m-btns [data-action=payslip-pdf-all]", title: "명세서 PDF 전체", text: "직원마다 따로 급여명세서 PDF를 받아요." },
         ],
 };
 
 // 튜토리얼이 잠깐 펼쳐 보이는 화면 (끝나면 원래대로). hash 가 있으면 그 화면으로 갔다가 set 을 한다.
+const hasMgr = () => store.employees.some((e) => e.active && isManager(e));
 const firstPayEmp = () => payrollFor(state.payroll.month, "").rows.find((r) => !r.salaried)?.emp.id ?? null;
 const closeTourShare = () => document.querySelectorAll(".share-back [data-share=close]").forEach((b) => b.click());
 function tourSlot(add) {
@@ -3910,6 +3921,12 @@ const TOUR_SCENES = {
   add: { hash: () => (isDesktop() ? null : `#/day/${todayDateString()}`), set: () => Object.assign(state, isDesktop() ? { selectedDate: todayDateString(), animateOpen: false, adding: true } : { adding: true }) },
   emp: { set: () => (state.payroll.employeeId = firstPayEmp() ?? "") },
   payslip: { set: tourPayslip },
+  payslipMgr: {
+    set: () => {
+      const e = store.employees.find((x) => x.active && isManager(x));
+      if (e) openPayslipState(e.id);
+    },
+  },
   share: {
     set: async () => {
       const id = firstPayEmp();
