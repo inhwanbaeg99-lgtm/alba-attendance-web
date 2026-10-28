@@ -3392,6 +3392,8 @@ function renderScheduleSheet({ wide = false } = {}) {
   const occupant = (col, row) => col.find((p) => p.start <= row.start && p.end >= row.end);
   // 같은 정시(예: 22:00~22:30, 22:30~23:00)에 속한 행들은 같은 사람이면 한 칸으로 합친다
   const hourOf = (row) => Math.floor(row.start / 60);
+  // PC: 근무 칸 위·아래 끝을 끌어서 시간 늘이기·줄이기
+  const grips = !compact && !wide && isDesktop();
 
   const body = rows
     .map((row, i) => {
@@ -3405,14 +3407,19 @@ function renderScheduleSheet({ wide = false } = {}) {
               const sameAll = Boolean(who) && group.length > 1 && group.every((r) => occupant(col, r) === who);
               if (sameAll && gi > 0) return "";
               const span = sameAll ? ` rowspan="${group.length}"` : "";
-              const slot = `data-action="edit-slot" data-wd="${d.wd}" data-start="${row.start}"`;
+              const end = sameAll ? group[group.length - 1].end : row.end;
+              const slot = `data-action="edit-slot" data-wd="${d.wd}" data-start="${row.start}" data-end="${end}"`;
               if (!who) return `<td class="sc-empty" ${slot}${span}></td>`;
               const bg = cssColor(who.emp.color);
               const ed = state.slotEdit;
               const editing = ed && String(ed.wd) === String(d.wd) && (ed.empId ?? ed.addEmpId) === who.emp.id;
               // 휴대폰: 칸이 좁아 이름 대신 색만 (누구인지는 아래 색 안내)
               const label = compact ? "" : esc(schedName(who.emp));
-              return `<td class="sc-name${editing ? " sc-editing" : ""}" ${slot} data-id="${who.emp.id}"${span} style="background:${bg};color:${textOn(bg)}"${compact ? ` title="${esc(schedName(who.emp))}" aria-label="${esc(schedName(who.emp))}"` : ""}>${label}</td>`;
+              const grip = grips
+                ? (who.start === row.start ? `<i class="sc-grip top" data-grip="start" data-html2canvas-ignore></i>` : "") +
+                  (who.end === end ? `<i class="sc-grip bot" data-grip="end" data-html2canvas-ignore></i>` : "")
+                : "";
+              return `<td class="sc-name${editing ? " sc-editing" : ""}" ${slot} data-id="${who.emp.id}"${span} style="background:${bg};color:${textOn(bg)}"${compact ? ` title="${esc(schedName(who.emp))}" aria-label="${esc(schedName(who.emp))}"` : ""}>${label}${grip}</td>`;
             })
             .join(""),
         )
@@ -3458,7 +3465,7 @@ function renderScheduleSheet({ wide = false } = {}) {
 function schedHelp() {
   return helpToggle(
     "schedule",
-    `${isDesktop() ? "이름 칸을 누르면 시간 수정·삭제, 회색 빈 칸을 누르면 근무자 추가예요. 옆에서 입력하면 표에 바로 보여요." : "색 칸을 누르면 시간 수정·삭제, 회색 빈 칸을 누르면 근무자 추가예요. 아래에서 입력하면 표에 바로 보여요."}<br />
+    `${isDesktop() ? "아래 이름을 표의 칸으로 <b>끌어다 놓으면</b> 1시간이 들어가요. 근무 칸의 위·아래 끝을 끌면 시간이 늘거나 줄고, 칸을 끌면 옮겨지고, 표 밖으로 끌어내면 빠져요. 30분 단위는 칸을 눌러서 고쳐요." : "색 칸을 누르면 시간 수정·삭제, 회색 빈 칸을 누르면 근무자 추가예요. 아래에서 입력하면 표에 바로 보여요."}<br />
     <b>저장</b>하면 직원 관리·달력·근무 기록에 반영되고, <b>임시저장</b>은 반영하지 않고 고친 내용만 보관해요.<br />
     지난 근무 기록은 제목 기간의 시작일(<b>${shortDate(scheduleStart())}</b>)부터 바뀌어요. 제목의 기간도 눌러서 고칠 수 있어요.`,
   );
@@ -3471,12 +3478,11 @@ function revealSlotPanel() {
     document.getElementById(state.slotEdit?.empId ? "slot-start" : "slot-emp")?.focus({ preventScroll: true });
     return;
   }
+  positionSlotPop();
   const panel = document.querySelector(".sched-panel");
   if (!panel) return;
   const { top, bottom } = panel.getBoundingClientRect();
-  // 패널이 표 아래에 있으면(좁은 화면) 항상 제목이 맨 위로 오게 — 키보드가 올라와도 입력칸이 가리지 않게
-  const below = window.matchMedia("(max-width: 1099px)").matches;
-  if (below || top < 0 || bottom > window.innerHeight) panel.scrollIntoView({ behavior: "smooth", block: "start" });
+  if (top < 0 || bottom > window.innerHeight) panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
   document.getElementById(state.slotEdit?.empId ? "slot-start" : "slot-emp")?.focus({ preventScroll: true });
 }
 
@@ -3503,18 +3509,54 @@ function renderSchedule() {
   return renderAdminShell(
     "schedule",
     `
-    <div class="sched-layout">
-      <div class="sched-main">
-        <div class="sched-scroll" id="sched-scroll">${renderScheduleSheet()}</div>
-        ${isDesktop() ? schedHelp() : ""}
-      </div>
-      <div class="sched-side${state.slotEdit ? " editing" : ""}">
-        <div id="sched-status">${renderSchedStatus()}</div>
-        <aside class="sched-panel">${renderSlotPanel()}</aside>
-      </div>
+    <div class="sched-solo" id="sched-solo">
+      <div class="sched-scroll" id="sched-scroll">${renderScheduleSheet()}</div>
+      <div id="sched-status">${renderSchedStatus()}</div>
+      ${renderSchedTray()}
+      ${schedHelp()}
+      ${state.slotEdit ? `<div class="slot-pop" id="slot-pop"><aside class="sched-panel">${renderSlotPanel()}</aside></div>` : ""}
     </div>`,
     { center: true, wide: true },
   );
+}
+
+// 근무표 아래 직원 이름 줄 (끌어서 표에 넣는다)
+function renderSchedTray() {
+  const people = store.employees.filter((e) => e.active);
+  return `
+    <div class="sched-tray" id="sched-tray">
+      <p class="sched-tray-hint">이름을 표의 칸으로 끌어다 놓으세요</p>
+      <div class="sched-chips">
+        ${people
+          .map((e) => {
+            const bg = cssColor(e.color);
+            return `<button type="button" class="sc-chip" data-chip="${e.id}" style="background:${bg};color:${textOn(bg)}">${esc(schedName(e))}${e.trainee ? `<small>교육</small>` : ""}</button>`;
+          })
+          .join("")}
+      </div>
+    </div>`;
+}
+
+// 편집 창을 누른 칸 옆에 띄운다 (오른쪽에 자리가 없으면 왼쪽)
+function positionSlotPop() {
+  const pop = document.getElementById("slot-pop");
+  const box = document.getElementById("sched-solo");
+  const ed = state.slotEdit;
+  if (!pop || !box || !ed) return;
+  const id = ed.empId ?? ed.addEmpId;
+  const cell =
+    (id && document.querySelector(`#sched-sheet td[data-wd="${ed.wd}"][data-id="${id}"]`)) ||
+    document.querySelector(`#sched-sheet td[data-wd="${ed.wd}"][data-start="${ed.start}"]`) ||
+    document.querySelector(`#sched-sheet td[data-wd="${ed.wd}"]`);
+  if (!cell) return;
+  const b = box.getBoundingClientRect();
+  const c = cell.getBoundingClientRect();
+  const w = pop.offsetWidth;
+  let left = c.right - b.left + 12;
+  if (c.right + 12 + w > window.innerWidth - 8) left = c.left - b.left - 12 - w;
+  const top = Math.max(0, Math.min(c.top - b.top - 8, box.offsetHeight - pop.offsetHeight));
+  pop.style.left = `${Math.max(0, left)}px`;
+  pop.style.top = `${top}px`;
 }
 
 function renderSlotPanel() {
@@ -3596,6 +3638,7 @@ function liveSlot({ final = false } = {}) {
 function refreshSchedule() {
   const scroll = document.getElementById("sched-scroll");
   if (scroll) scroll.innerHTML = renderScheduleSheet();
+  positionSlotPop();
   const dayList = document.getElementById("sched-day-list");
   if (dayList) dayList.innerHTML = renderDayShifts();
   const status = document.getElementById("sched-status");
@@ -3673,10 +3716,9 @@ const TOURS = {
     pc
       ? [
           { sel: ".sc-period", title: "근무표 시작 날짜", text: "이 근무표를 언제부터 쓸지 숫자 8자리로 입력해요(예: 20261101). 저장할 때마다 한 번씩 다시 입력해야 저장돼요." },
-          { sel: "td.sc-name", title: "근무 칸", text: "색 칸이 근무예요. 누르면 오른쪽에서 그 근무 시간을 고치거나 뺄 수 있어요." },
-          { scene: "slot", sel: ".sched-panel", title: "근무 고치기 · 삭제", text: "시작·끝 시간을 고치면 표에 바로 보여요. <b>완료</b>로 넣고, 빼려면 <b>근무 삭제</b>를 눌러요." },
-          { sel: "td.sc-empty", title: "근무자 추가", text: "회색 빈 칸을 누르면 그 요일, 그 시각으로 근무자를 추가해요." },
-          { scene: "slotAdd", sel: ".sched-panel", title: "근무자 추가 입력칸", text: "직원을 고르고 시작·끝 시간을 넣은 뒤 <b>완료</b>를 눌러요." },
+          { sel: ".sched-tray", title: "이름 끌어다 놓기", text: "직원 이름을 표의 칸으로 <b>끌어다 놓으면</b> 그 요일, 그 시각에 1시간이 들어가요. 같은 요일에 또 놓으면 그만큼 이어져요." },
+          { sel: "td.sc-name", title: "근무 칸 끌기", text: "칸의 <b>위·아래 끝</b>을 끌면 시작·끝 시간이 바뀌어요. 칸을 끌면 다른 시간·요일로 옮겨지고, <b>표 밖으로 끌어내면</b> 빠져요." },
+          { scene: "slot", sel: ".sched-panel", title: "눌러서 고치기", text: "칸을 누르면 이 창이 떠요. 22:30처럼 <b>30분 단위</b>는 여기서 고쳐요. <b>근무 삭제</b>로 뺄 수도 있어요." },
           { sel: ".sc-actions [data-action=schedule-temp]", title: "임시저장", text: "고친 내용을 보관만 해요. 직원 화면·달력·근무 기록에는 아직 반영되지 않아요." },
           { sel: ".sc-actions [data-action=schedule-save]", title: "저장", text: "시작 날짜부터 직원 화면, 달력, 근무 기록에 반영돼요." },
           { sel: ".sc-actions [data-action=schedule-share]", title: "카카오톡 전송하기", text: "누르면 근무표를 사진으로 만들어요." },
@@ -3966,6 +4008,147 @@ const homeHash = () => (ADMIN_SITE ? "#/calendar" : "#/");
 // 다시 그릴 때 입력 중이던 시간 칸 값을 지키는 칸들 (편집이 끝나면 칸이 사라지므로 그대로 남지 않는다)
 const KEEP_FIELDS = ["edit-start", "edit-end", "extra-name", "extra-start", "extra-end"];
 
+// ---------- 근무표 끌어서 넣기 (PC) ----------
+// 이름 줄 → 칸: 1시간 추가(같은 요일에 이미 있으면 이어 붙임) · 칸 끌기: 옮기기 · 위/아래 끝: 시간 늘이기
+// 표 밖으로 끌어내면 그 요일 근무를 뺀다. 끄는 동안 표에 바로 보이고, 놓으면 초안에 남는다(저장 전까지 반영 안 됨).
+var schedDrag = null;
+var schedNoClick = false;
+const padTime = (min) => fromMin(min).padStart(5, "0");
+
+function schedDragApply(target) {
+  const d = schedDrag;
+  state.schedWork.weekly = structuredClone(d.base);
+  const emp = employeeById(d.empId);
+  if (!emp) return;
+  const cur = (wd) => effWeekly(emp)[wd];
+  if (d.kind === "add" || d.kind === "move") {
+    if (!target) {
+      if (d.kind === "move") draftWeekly(emp, d.wd, null);
+      return;
+    }
+    const tStart = Number(target.dataset.start);
+    let start;
+    let end;
+    if (d.kind === "add") {
+      start = tStart;
+      end = Math.floor(tStart / 60) * 60 + 60;
+    } else {
+      start = Math.max(0, tStart - d.offset);
+      end = start + d.dur;
+    }
+    end = Math.min(end, 24 * 60 - 1);
+    if (d.kind === "move") draftWeekly(emp, d.wd, null);
+    const had = cur(target.dataset.wd);
+    if (had) {
+      start = Math.min(start, toMin(had.start));
+      end = Math.max(end, toMin(had.end));
+    }
+    draftWeekly(emp, target.dataset.wd, { start: padTime(start), end: padTime(end) });
+    return;
+  }
+  // 늘이기 · 줄이기: 같은 요일 안에서만
+  const had = cur(d.wd);
+  if (!target || !had || target.dataset.wd !== d.wd) return;
+  let start = toMin(had.start);
+  let end = toMin(had.end);
+  if (d.grip === "end") end = Math.max(Number(target.dataset.end), start + 30);
+  else start = Math.min(Number(target.dataset.start), end - 30);
+  draftWeekly(emp, d.wd, { start: padTime(start), end: padTime(end) });
+}
+
+document.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0 || !ADMIN_SITE || route().name !== "schedule" || !isDesktop()) return;
+  const chip = e.target.closest("[data-chip]");
+  const grip = e.target.closest("[data-grip]");
+  const cell = e.target.closest("#sched-sheet td.sc-name");
+  if (!chip && !cell) return;
+  const empId = chip ? chip.dataset.chip : cell.dataset.id;
+  const emp = employeeById(empId);
+  if (!emp) return;
+  const wd = cell?.dataset.wd;
+  const had = wd != null ? effWeekly(emp)[wd] : null;
+  schedDrag = {
+    kind: chip ? "add" : grip ? "resize" : "move",
+    grip: grip?.dataset.grip,
+    empId,
+    wd,
+    offset: had ? Number(cell.dataset.start) - toMin(had.start) : 0,
+    dur: had ? toMin(had.end) - toMin(had.start) : 60,
+    x: e.clientX,
+    y: e.clientY,
+    started: false,
+  };
+  e.preventDefault();
+});
+
+document.addEventListener("pointermove", (e) => {
+  const d = schedDrag;
+  if (!d) return;
+  if (!d.started) {
+    if (Math.hypot(e.clientX - d.x, e.clientY - d.y) < 5) return;
+    d.started = true;
+    // 열려 있던 편집 창은 입력한 대로 두고 닫는다
+    if (state.slotEdit) {
+      liveSlot({ final: true });
+      state.slotEdit = null;
+      state.error = "";
+      render();
+    }
+    d.base = structuredClone(schedWork().weekly);
+    document.body.classList.add("sc-dragging");
+    if (d.kind !== "resize") {
+      const emp = employeeById(d.empId);
+      const bg = cssColor(emp.color);
+      d.ghost = Object.assign(document.createElement("div"), { className: "sc-ghost", textContent: schedName(emp) });
+      d.ghost.style.cssText = `background:${bg};color:${textOn(bg)}`;
+      document.body.appendChild(d.ghost);
+    }
+  }
+  if (d.ghost) d.ghost.style.transform = `translate(${e.clientX + 12}px, ${e.clientY + 12}px)`;
+  const target = document.elementFromPoint(e.clientX, e.clientY)?.closest("#sched-sheet td[data-wd]") ?? null;
+  const key = target ? `${target.dataset.wd}|${target.dataset.start}|${target.dataset.end}` : "";
+  if (key === d.key) return;
+  d.key = key;
+  schedDragApply(target);
+  refreshSchedule();
+  document.querySelectorAll("#sched-sheet td.sc-drop").forEach((x) => x.classList.remove("sc-drop"));
+  if (target) document.querySelector(`#sched-sheet td[data-wd="${target.dataset.wd}"][data-id="${d.empId}"]`)?.classList.add("sc-drop");
+  document.getElementById("sched-tray")?.classList.toggle("sc-out", !target && d.kind === "move");
+});
+
+document.addEventListener("pointerup", () => {
+  const d = schedDrag;
+  schedDrag = null;
+  if (!d?.started) return;
+  d.ghost?.remove();
+  document.body.classList.remove("sc-dragging");
+  schedNoClick = true;
+  setTimeout(() => (schedNoClick = false), 0);
+  const emp = employeeById(d.empId);
+  if (!d.key && d.kind === "move") showToast(`${WEEKDAYS[d.wd]}요일 ${schedName(emp)} 근무를 뺐어요`);
+  render();
+});
+
+document.addEventListener(
+  "click",
+  (e) => {
+    if (schedNoClick) {
+      e.stopPropagation();
+      e.preventDefault();
+      schedNoClick = false;
+      return;
+    }
+    // PC 근무표: 편집 창 바깥(다른 칸 · 버튼 말고)을 누르면 입력한 대로 두고 닫는다
+    if (state.slotEdit && isDesktop() && route().name === "schedule" && e.target.closest("#app") && !e.target.closest(".slot-pop, #sched-sheet td[data-wd], .sc-actions, .tour, .tour-pop")) {
+      liveSlot({ final: true });
+      state.slotEdit = null;
+      state.error = "";
+      render();
+    }
+  },
+  true,
+);
+
 function render() {
   const kept = KEEP_FIELDS.map((id) => [id, document.getElementById(id)?.value]).filter(([, v]) => v);
   const focusedId = document.activeElement?.id;
@@ -3987,6 +4170,7 @@ function render() {
 
   const period = document.querySelector(".sc-period");
   if (period) fitPeriod(period);
+  if (r.name === "schedule") positionSlotPop();
   placeNavPill();
   if (state.pageEnter && r.name === "records") countUp(app.querySelectorAll(".pay-table td.net, .m-main .net"));
   // 카톡 복사 후 다음 직원으로 넘어갔음을 보여준다: 직원 칸 반짝, 표 새로 들어옴, 전송 버튼 두근

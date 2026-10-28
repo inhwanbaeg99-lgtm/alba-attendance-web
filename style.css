@@ -5503,3 +5503,137 @@ td.name {
   max-height: calc(100vh - 80px);
   overflow-y: auto;
 }
+
+/* 근무표 (PC): 가운데 표 + 아래 이름 줄에서 끌어다 놓기 + 칸 옆에 뜨는 편집 창 */
+.sched-solo {
+  position: relative;
+  max-width: 1120px;
+  margin: 0 auto;
+}
+.sched-solo #sched-status .sched-status {
+  text-align: center;
+}
+.sched-tray {
+  margin-top: 16px;
+  padding: 16px 20px 18px;
+  border-radius: 20px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  transition: border-color 0.15s, background 0.15s;
+}
+.sched-tray.sc-out {
+  border-color: var(--red);
+  background: rgb(239 68 68 / 0.06);
+}
+.sched-tray.sc-out .sched-tray-hint::after {
+  content: " · 여기에 놓으면 이 근무가 빠져요";
+  color: var(--red);
+}
+.sched-tray-hint {
+  margin: 0 0 12px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--ink-sub);
+}
+.sched-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+.sc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 16px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.08);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  transition: transform 0.12s;
+}
+.sc-chip:hover {
+  transform: translateY(-2px);
+}
+.sc-chip small {
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.7;
+}
+.sc-ghost {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1000;
+  padding: 8px 16px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  pointer-events: none;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+}
+body.sc-dragging,
+body.sc-dragging * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+.sched-solo #sched-sheet td.sc-name {
+  position: relative;
+  cursor: grab;
+}
+.sched-solo #sched-sheet td.sc-drop {
+  box-shadow: inset 0 0 0 3px var(--accent);
+}
+.sc-grip {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 8px;
+  cursor: ns-resize;
+}
+.sc-grip.top {
+  top: 0;
+}
+.sc-grip.bot {
+  bottom: 0;
+}
+.sc-grip::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  width: 22px;
+  height: 3px;
+  margin-left: -11px;
+  border-radius: 2px;
+  background: currentColor;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.sc-grip.top::after {
+  top: 2px;
+}
+.sc-grip.bot::after {
+  bottom: 2px;
+}
+td.sc-name:hover .sc-grip::after {
+  opacity: 0.45;
+}
+.sc-grip:hover::after {
+  opacity: 0.9 !important;
+}
+.sched.capturing .sc-grip {
+  display: none;
+}
+.slot-pop {
+  position: absolute;
+  z-index: 40;
+  width: 280px;
+}
+.slot-pop .sched-panel {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.14);
+}
