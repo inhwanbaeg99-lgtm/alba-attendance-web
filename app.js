@@ -1463,7 +1463,7 @@ function renderRecordsMobile() {
       <button type="button" class="m-row m-pay" style="--i:${i}" data-action="open-sheet" data-sheet="pay" data-id="${r.emp.id}">
         <span class="swatch big" style="background:${cssColor(r.emp.color)}"></span>
         <span class="m-row-body"><b>${esc(r.emp.name)}</b><small>${r.days}일 · ${hrs(r.hours)}</small></span>
-        <span class="m-pay-net net">${won(r.net)}</span>
+        <span class="m-pay-net net">${r.net === null ? `<span class="need">공제 입력 필요</span>` : won(r.net)}</span>
         <span class="m-chev">${ICON_CHEVRON}</span>
       </button>`,
     )
@@ -1518,20 +1518,29 @@ function renderPaySheet(emp) {
       <span class="swatch big" style="background:${cssColor(emp.color)}"></span>
       <div><h2>${esc(emp.name)}</h2><small>${Number(month.slice(5, 7))}월 · ${r.days}일 · ${hrs(r.hours)}</small></div>
     </div>
-    <div class="m-hero small"><small>받을 금액</small><strong>${won(r.net)}</strong></div>
+    <div class="m-hero small"><small>받을 금액</small><strong>${r.net === null ? "공제 입력 필요" : won(r.net)}</strong></div>
     <ul class="m-lines">
-      ${line("기본급", r.base)}
-      ${line("주휴수당", r.weekly.total)}
+      ${line(r.salaried ? "기본급 (월급)" : "기본급", r.base)}
+      ${r.salaried ? (r.meal ? line("식대 (비과세)", r.meal) : "") : line("주휴수당", r.weekly.total)}
       ${r.allowances.filter((a) => a.name || Number(a.amount)).map((a) => line(esc(a.name || "수당"), Number(a.amount) || 0)).join("")}
       ${line("지급 합계", r.gross, "sum")}
-      ${line("소득세", r.income)}
-      ${line("지방소득세", r.local)}
+      ${
+        r.salaried
+          ? r.ded
+            ? DED_KEYS.map(([k, label]) => (r.ded[k] ? line(label, r.ded[k]) : "")).join("")
+            : `<li><span>4대보험 · 근로소득세</span><b class="need">입력 필요</b></li>`
+          : `${line("소득세", r.income)}${line("지방소득세", r.local)}`
+      }
     </ul>
-    <p class="sheet-label">날짜별 근무</p>
+    ${
+      r.salaried
+        ? ""
+        : `<p class="sheet-label">날짜별 근무</p>
     <ul class="m-days-list">${days || `<li><span>근무 기록이 없어요</span></li>`}</ul>
-    <button type="button" class="btn-ghost m-share" data-action="share-ts-image" data-id="${emp.id}">카카오톡 전송하기</button>
+    <button type="button" class="btn-ghost m-share" data-action="share-ts-image" data-id="${emp.id}">카카오톡 전송하기</button>`
+    }
     <div class="sheet-actions">
-      <button type="button" class="btn-ghost" data-action="open-payslip" data-id="${emp.id}">수당 · 명세서</button>
+      <button type="button" class="btn-ghost" data-action="open-payslip" data-id="${emp.id}">${r.salaried ? "급여 입력" : "수당 · 명세서"}</button>
       <button type="button" class="btn-primary" data-action="payslip-pdf-one" data-id="${emp.id}">명세서 PDF</button>
     </div>`;
 }
@@ -1630,8 +1639,78 @@ function setAllowances(ym, empId, list) {
   store.allowances[ym] = { ...store.allowances[ym], [empId]: list };
 }
 
-function payrollRow(emp, ym, recs, allowanceOverride) {
+// ---------- 월급제 직원 (매니저 · 4대보험) ----------
+// 월급·식대·공제액은 세무사에게 받은 금액을 한 번 입력하면 그달부터 다음 달, 그다음 달에도 그대로 이어진다.
+// 금액이 바뀐 달에만 새로 입력하면 그달부터 새 금액. 지난달 명세서는 그때 금액 그대로.
+// 시작할 때 cleanStore 에서 쓸 수 있게 var · function 으로
+var DED_KEYS = [["pension", "국민연금"], ["health", "건강보험"], ["care", "장기요양보험"], ["employ", "고용보험"], ["income", "근로소득세"], ["local", "지방소득세"]];
+function isSalaried(emp) {
+  return Boolean(emp) && isManager(emp);
+}
+const monthLabel = (m) => `${Number(m.slice(0, 4))}년 ${Number(m.slice(5, 7))}월`;
+
+function salaryFor(empId, ym) {
+  let cur = null;
+  for (const h of store.salary?.[empId]?.hist ?? []) if (h.from <= ym) cur = h;
+  return cur;
+}
+
+function setSalary(empId, ym, entry) {
+  store.salary = store.salary ?? {};
+  const rec = (store.salary[empId] = store.salary[empId] ?? { hist: [] });
+  rec.hist = rec.hist.filter((h) => h.from !== ym);
+  const prev = salaryFor(empId, ym);
+  const same = (a, b) => JSON.stringify({ s: a.salary, m: a.meal, d: a.ded }) === JSON.stringify({ s: b.salary, m: b.meal, d: b.ded });
+  // 지난달부터 이어지는 금액과 같으면 따로 적지 않는다 (그래야 "언제부터" 가 처음 입력한 달로 남는다)
+  if (!prev || !same(prev, entry)) rec.hist.push({ from: ym, ...entry });
+  rec.hist.sort((a, b) => (a.from < b.from ? -1 : 1));
+}
+
+// 명세서 창에서 입력 중인 값 → 저장할 모양 (공제 칸을 하나도 안 채웠으면 ded = null: "공제 입력 필요")
+function normalizeSalary(draft) {
+  const filled = DED_KEYS.some(([k]) => draft.ded?.[k] !== null && draft.ded?.[k] !== undefined && draft.ded?.[k] !== "");
+  return {
+    salary: Number(draft.salary) || 0,
+    meal: Number(draft.meal) || 0,
+    ded: filled ? Object.fromEntries(DED_KEYS.map(([k]) => [k, Number(draft.ded[k]) || 0])) : null,
+  };
+}
+
+// 월급제 설정: { 직원id: { hist: [{ from: "YYYY-MM", salary, meal, ded: {국민연금…} | null }] } }
+function cleanSalary(v) {
+  const out = {};
+  const money = (n) => (Number.isFinite(Number(n)) && Number(n) >= 0 ? Math.round(Number(n)) : 0);
+  for (const [id, x] of Object.entries(v && typeof v === "object" ? v : {})) {
+    if (!safeId(id) || !x || typeof x !== "object") continue;
+    const hist = (Array.isArray(x.hist) ? x.hist : [])
+      .filter((h) => h && /^\d{4}-\d{2}$/.test(h.from))
+      .map((h) => ({
+        from: h.from,
+        salary: money(h.salary),
+        meal: money(h.meal),
+        ded: h.ded && typeof h.ded === "object" ? Object.fromEntries(DED_KEYS.map(([k]) => [k, money(h.ded[k])])) : null,
+      }))
+      .sort((a, b) => (a.from < b.from ? -1 : 1));
+    out[id] = { hist };
+  }
+  return out;
+}
+
+function openPayslipState(id) {
+  state.sheet = null; // 휴대폰: 급여 시트에서 명세서 창으로 넘어간다
+  state.payslipId = id;
+  // 매니저는 교육수당 칸 없이 시작
+  const salaried = isSalaried(employeeById(id));
+  state.allowDraft = structuredClone(salaried ? store.allowances?.[state.payroll.month]?.[id] ?? [] : allowancesFor(state.payroll.month, id));
+  const cur = salaryFor(id, state.payroll.month);
+  state.salDraft = isSalaried(employeeById(id))
+    ? { salary: cur?.salary ?? 0, meal: cur?.meal ?? 0, ded: Object.fromEntries(DED_KEYS.map(([k]) => [k, cur?.ded ? cur.ded[k] : null])) }
+    : null;
+}
+
+function payrollRow(emp, ym, recs, allowanceOverride, salaryOverride) {
   const mine = recs.filter((r) => r.employeeId === emp.id);
+  if (isSalaried(emp)) return salaryRow(emp, ym, mine, allowanceOverride, salaryOverride);
   const hours = mine.reduce((sum, r) => sum + hoursBetween(r.clockIn, r.clockOut), 0);
   // 교육으로 일한 시간은 기본급이 아니라 교육수당으로 (시간 × 시급)
   const trainHours = mine.filter(isTrainingRec).reduce((sum, r) => sum + hoursBetween(r.clockIn, r.clockOut), 0);
@@ -1642,20 +1721,47 @@ function payrollRow(emp, ym, recs, allowanceOverride) {
   const extra = allowances.reduce((sum, a) => sum + (Number(a.amount) || 0), 0);
   const gross = base + weekly.total + extra;
   const tax = taxes(gross);
-  return { emp, days: mine.length, hours, base, weekly, allowances, extra, gross, ...tax, net: gross - tax.income - tax.local };
+  return { emp, salaried: false, days: mine.length, hours, base, weekly, allowances, extra, meal: 0, ins: 0, gross, ...tax, dedTotal: tax.income + tax.local, net: gross - tax.income - tax.local };
+}
+
+// 월급제: 기본급 = 월급(세금 붙는 부분), 식대(비과세), 수당. 공제는 입력한 4대보험·근로소득세 그대로.
+// 근무일·시간은 출근 기록이 있으면 기록으로, 없으면 근무표대로 (매니저는 출근을 안 찍으므로)
+function salaryRow(emp, ym, mine, allowanceOverride, salaryOverride) {
+  const s = salaryOverride ?? salaryFor(emp.id, ym);
+  const planDays = monthDays(ym).filter((d) => weeklyOn(emp, d)[weekdayOf(d)]);
+  const days = mine.length || planDays.length;
+  const hours = mine.length ? mine.reduce((sum, r) => sum + hoursBetween(r.clockIn, r.clockOut), 0) : plannedHours(emp, planDays);
+  const base = s?.salary ?? 0;
+  const meal = s?.meal ?? 0;
+  const allowances = allowanceOverride ?? store.allowances?.[ym]?.[emp.id] ?? [];
+  const extra = allowances.reduce((sum, a) => sum + (Number(a.amount) || 0), 0);
+  const gross = base + meal + extra;
+  const ded = s?.ded ?? null;
+  const ins = ded ? ded.pension + ded.health + ded.care + ded.employ : 0;
+  const income = ded?.income ?? 0;
+  const local = ded?.local ?? 0;
+  const dedTotal = ins + income + local;
+  return {
+    emp, salaried: true, days, hours, base, meal, weekly: { total: 0, weeks: [] }, allowances, extra, gross,
+    ded, ins, income, local, dedTotal, net: ded ? gross - dedTotal : null, setFrom: s?.from ?? null,
+  };
 }
 
 function payrollFor(ym, employeeId) {
   const recs = monthRecords(ym, employeeId);
   const ids = new Set(recs.map((r) => r.employeeId));
+  // 월급제 직원(매니저)은 출근 기록이 없어도 급여에 나온다
+  for (const e of store.employees) if (e.active && isSalaried(e) && (!employeeId || e.id === employeeId)) ids.add(e.id);
   const rows = store.employees.filter((e) => ids.has(e.id)).map((emp) => payrollRow(emp, ym, recs));
-  const sum = (k) => rows.reduce((acc, r) => acc + r[k], 0);
+  const sum = (k) => rows.reduce((acc, r) => acc + (r[k] ?? 0), 0);
   const total = {
     days: sum("days"),
     hours: sum("hours"),
     base: sum("base"),
     weekly: rows.reduce((acc, r) => acc + r.weekly.total, 0),
     extra: sum("extra"),
+    meal: sum("meal"),
+    ins: sum("ins"),
     gross: sum("gross"),
     income: sum("income"),
     local: sum("local"),
@@ -1774,16 +1880,20 @@ const STORE_NAME = "메가MGC커피 춘천온의파크점";
 
 function renderPayslip(r, ym) {
   const [y, m] = ym.split("-").map(Number);
-  const pay = [
-    ["기본급", r.base],
-    ["주휴수당", r.weekly.total],
-    ...r.allowances.filter((a) => a.name || Number(a.amount)).map((a) => [a.name || "수당", Number(a.amount) || 0]),
-  ];
-  const deduct = [
-    ["소득세 (3%)", r.income],
-    ["지방소득세 (0.3%)", r.local],
-  ];
-  const deductTotal = r.income + r.local;
+  const extras = r.allowances.filter((a) => a.name || Number(a.amount)).map((a) => [a.name || "수당", Number(a.amount) || 0]);
+  const pay = r.salaried
+    ? [["기본급 (월급)", r.base], ...(r.meal ? [["식대 (비과세)", r.meal]] : []), ...extras]
+    : [["기본급", r.base], ["주휴수당", r.weekly.total], ...extras];
+  const deduct = r.salaried
+    ? r.ded
+      ? DED_KEYS.map(([k, label]) => [label, r.ded[k]]).filter(([, v]) => v)
+      : []
+    : [
+        ["소득세 (3%)", r.income],
+        ["지방소득세 (0.3%)", r.local],
+      ];
+  const deductTotal = r.dedTotal;
+  const pending = r.salaried && !r.ded;
   const line = ([label, value]) => `<li><span>${esc(label)}</span><b>${won(value)}</b></li>`;
   const issued = todayDateString().replaceAll("-", ".");
 
@@ -1794,11 +1904,11 @@ function renderPayslip(r, ym) {
         <span class="ps-month">${y}년 ${m}월</span>
       </header>
       <h1 class="ps-name">${esc(r.emp.name)} 님</h1>
-      <p class="ps-meta">시급 ${won(r.emp.hourlyWage)} · 근무 ${r.days}일 · 총 ${Number(r.hours.toFixed(2))}시간</p>
+      <p class="ps-meta">${r.salaried ? "월급제" : `시급 ${won(r.emp.hourlyWage)}`} · 근무 ${r.days}일 · 총 ${Number(r.hours.toFixed(2))}시간</p>
 
       <div class="ps-net">
         <span>지급 금액</span>
-        <strong>${won(r.net)}</strong>
+        <strong>${pending ? "공제액 입력 필요" : won(r.net)}</strong>
       </div>
 
       <section class="ps-sec">
@@ -1809,7 +1919,7 @@ function renderPayslip(r, ym) {
 
       <section class="ps-sec">
         <h2>공제</h2>
-        <ul>${deductTotal ? deduct.map(line).join("") : `<li><span>공제 없음</span><b>0원</b></li>`}</ul>
+        <ul>${pending ? `<li><span>4대보험 · 근로소득세</span><b>입력 필요</b></li>` : deductTotal ? deduct.map(line).join("") : `<li><span>공제 없음</span><b>0원</b></li>`}</ul>
         <p class="ps-sum"><span>공제 합계</span><b>${won(deductTotal)}</b></p>
       </section>
 
@@ -1821,13 +1931,40 @@ function renderPayslip(r, ym) {
     </div>`;
 }
 
+// 명세서 창: 월급제 직원의 월급·식대·공제액 (세무사 금액)
+function renderSalaryInputs(empId, month) {
+  const d = state.salDraft;
+  const cur = salaryFor(empId, month);
+  const money = (v) => (v === null || v === undefined || v === "" ? "" : Number(v).toLocaleString());
+  const row = (label, key, value, hint = "") => `
+    <label class="sal-row"><span>${label}${hint ? `<small>${hint}</small>` : ""}</span>
+      <input class="field money" type="text" inputmode="numeric" value="${money(value)}" placeholder="${key.startsWith("ded.") ? "입력 필요" : "0"}" data-sal="${key}" aria-label="${label}" /></label>`;
+  const since = cur ? (cur.from === month ? "이번 달에 입력한 금액이에요." : `${monthLabel(cur.from)}에 입력한 금액이 이어지고 있어요.`) : "처음 입력하면 이번 달부터 다음 달에도 같은 금액이 들어가요.";
+  const m = Number(month.slice(5, 7));
+  const notice =
+    m === 1 ? "1월은 보험료율이 바뀌는 달이에요. 세무사 금액과 같은지 확인해주세요."
+    : m === 4 ? "4월은 건강보험 정산이 있는 달이에요. 세무사 금액과 같은지 확인해주세요."
+    : m === 7 ? "7월은 국민연금 기준 금액이 바뀌는 달이에요. 세무사 금액과 같은지 확인해주세요."
+    : "";
+  return `
+    <div class="sal-box">
+      <p class="sal-title">월급 <small>세금 떼기 전</small></p>
+      ${row("기본급 (월급)", "salary", d.salary)}
+      ${row("식대", "meal", d.meal, "비과세 · 월 20만 원까지")}
+      <p class="sal-title">공제액 <small>세무사에게 받은 금액 그대로</small></p>
+      ${DED_KEYS.map(([k, label]) => row(label, `ded.${k}`, d.ded[k])).join("")}
+      <p class="sal-note">${since} 금액이 바뀐 달에만 고치면 그달부터 새 금액이 이어져요.</p>
+      ${notice ? `<p class="sal-alert">${notice}</p>` : ""}
+    </div>`;
+}
+
 function renderPayslipModal() {
   const empId = state.payslipId;
   if (!empId) return "";
   const { month } = state.payroll;
   const emp = employeeById(empId);
   // 명세서 창에서는 저장 전까지 수정 중인 수당(state.allowDraft)으로 미리 계산
-  const r = payrollRow(emp, month, monthRecords(month, empId), state.allowDraft);
+  const r = payrollRow(emp, month, monthRecords(month, empId), state.allowDraft, state.salDraft ? normalizeSalary(state.salDraft) : undefined);
   const list = state.allowDraft ?? allowancesFor(month, empId);
   const auto = r.allowances.find((a) => a.auto)?.auto ?? 0;
   return `
@@ -1835,7 +1972,8 @@ function renderPayslipModal() {
       <div class="ps-dialog" data-stop>
         <div class="ps-side">
           <p class="staff-title">${esc(emp.name)} · ${Number(month.slice(5, 7))}월 명세서</p>
-          <p class="sub">수당을 입력하면 지급액과 세금이 다시 계산돼요. 저장한 뒤 근무 기록의 <b>명세서 PDF</b>로 한꺼번에 받을 수 있어요.</p>
+          <p class="sub">${state.salDraft ? "월급·식대·공제액과 수당을 입력하면 명세서가 바로 바뀌어요." : "수당을 입력하면 지급액과 세금이 다시 계산돼요. 저장한 뒤 근무 기록의 <b>명세서 PDF</b>로 한꺼번에 받을 수 있어요."}</p>
+          ${state.salDraft ? renderSalaryInputs(empId, month) : ""}
           ${auto ? `<p class="ps-train-note">교육 근무 <b>${won(auto)}</b>은 교육수당에 자동으로 더해져요.</p>` : ""}
           <div class="ps-allow">
             ${list
@@ -1871,16 +2009,21 @@ function renderRecords() {
     .map(
       (r, i) => `
       <tr style="--i:${i}">
-        <td class="name">${esc(r.emp.name)}</td>
+        <td class="name">${esc(r.emp.name)}${r.salaried ? ` <span class="pay-tag">월급</span>` : ""}</td>
         <td class="num" data-label="근무일">${r.days}일</td>
         <td class="num" data-label="근무시간">${hrs(r.hours)}</td>
         <td class="num" data-label="기본급">${won(r.base)}</td>
-        <td class="num" data-label="주휴수당" title="${esc(r.weekly.weeks.map((w) => `${shortDate(w.mon)}~${shortDate(w.sun)} 소정 ${hrs(w.planned)} (실근무 ${hrs(w.hours)}) ${w.reason || `→ ${won(w.amount)}`}`).join("\n"))}">${won(r.weekly.total)}</td>
-        <td class="num" data-label="수당">${won(r.extra)}</td>
+        ${
+          r.salaried
+            ? `<td class="num muted" data-label="주휴수당">월급 포함</td>`
+            : `<td class="num" data-label="주휴수당" title="${esc(r.weekly.weeks.map((w) => `${shortDate(w.mon)}~${shortDate(w.sun)} 소정 ${hrs(w.planned)} (실근무 ${hrs(w.hours)}) ${w.reason || `→ ${won(w.amount)}`}`).join("\n"))}">${won(r.weekly.total)}</td>`
+        }
+        <td class="num" data-label="수당"${r.meal ? ` title="식대 ${won(r.meal)} (비과세) 포함"` : ""}>${won(r.extra + r.meal)}</td>
         <td class="num strong" data-label="지급총액">${won(r.gross)}</td>
-        <td class="num" data-label="소득세">${won(r.income)}</td>
-        <td class="num" data-label="지방소득세">${won(r.local)}</td>
-        <td class="num strong net" data-label="실지급액">${won(r.net)}</td>
+        <td class="num${r.salaried ? "" : " muted"}" data-label="4대보험">${r.salaried ? (r.ded ? won(r.ins) : "-") : "-"}</td>
+        <td class="num" data-label="소득세">${r.salaried && !r.ded ? "-" : won(r.income)}</td>
+        <td class="num" data-label="지방소득세">${r.salaried && !r.ded ? "-" : won(r.local)}</td>
+        <td class="num strong net" data-label="실지급액">${r.net === null ? `<button type="button" class="link-btn need" data-action="open-payslip" data-id="${r.emp.id}">공제 입력 필요</button>` : won(r.net)}</td>
         <td class="ps-cell"><button type="button" class="link-btn" data-action="open-payslip" data-id="${r.emp.id}">명세서</button></td>
       </tr>`,
     )
@@ -1899,7 +2042,7 @@ function renderRecords() {
         <label for="r-emp">직원</label>
         <select id="r-emp" class="field" data-payroll="employeeId">
           <option value="">전체</option>
-          ${store.employees.filter((e) => !isManager(e)).map((e) => `<option value="${e.id}"${e.id === employeeId ? " selected" : ""}>${esc(e.name)}</option>`).join("")}
+          ${store.employees.filter((e) => !isManager(e) || e.active).map((e) => `<option value="${e.id}"${e.id === employeeId ? " selected" : ""}>${esc(e.name)}</option>`).join("")}
         </select>
       </div>
       <div>
@@ -1928,12 +2071,12 @@ function renderRecords() {
     </div>
     <div class="table-wrap pay-wrap">
       <table class="pay-table">
-        <thead><tr><th>이름</th><th class="num">근무일</th><th class="num">근무시간</th><th class="num">기본급</th><th class="num">주휴수당</th><th class="num">수당</th><th class="num">지급총액</th><th class="num">소득세</th><th class="num">지방소득세</th><th class="num">실지급액</th><th></th></tr></thead>
+        <thead><tr><th>이름</th><th class="num">근무일</th><th class="num">근무시간</th><th class="num">기본급</th><th class="num">주휴수당</th><th class="num">수당</th><th class="num">지급총액</th><th class="num">4대보험</th><th class="num">소득세</th><th class="num">지방소득세</th><th class="num">실지급액</th><th></th></tr></thead>
         <tbody>
-          ${summary || `<tr><td colspan="11" class="empty">이 달의 근무 기록이 없습니다.</td></tr>`}
+          ${summary || `<tr><td colspan="12" class="empty">이 달의 근무 기록이 없습니다.</td></tr>`}
           ${
             rows.length > 1
-              ? `<tr class="total-row"><td class="name">합계</td><td class="num" data-label="근무일">${total.days}일</td><td class="num" data-label="근무시간">${hrs(total.hours)}</td><td class="num" data-label="기본급">${won(total.base)}</td><td class="num" data-label="주휴수당">${won(total.weekly)}</td><td class="num" data-label="수당">${won(total.extra)}</td><td class="num" data-label="지급총액">${won(total.gross)}</td><td class="num" data-label="소득세">${won(total.income)}</td><td class="num" data-label="지방소득세">${won(total.local)}</td><td class="num net" data-label="실지급액">${won(total.net)}</td><td class="ps-cell"></td></tr>`
+              ? `<tr class="total-row"><td class="name">합계</td><td class="num" data-label="근무일">${total.days}일</td><td class="num" data-label="근무시간">${hrs(total.hours)}</td><td class="num" data-label="기본급">${won(total.base)}</td><td class="num" data-label="주휴수당">${won(total.weekly)}</td><td class="num" data-label="수당">${won(total.extra + total.meal)}</td><td class="num" data-label="지급총액">${won(total.gross)}</td><td class="num" data-label="4대보험">${won(total.ins)}</td><td class="num" data-label="소득세">${won(total.income)}</td><td class="num" data-label="지방소득세">${won(total.local)}</td><td class="num net" data-label="실지급액">${won(total.net)}</td><td class="ps-cell"></td></tr>`
               : ""
           }
         </tbody>
@@ -1943,6 +2086,7 @@ function renderRecords() {
       "records",
       `주휴수당: 주는 일~토 기준이고 월 경계는 안 넘어요. 1일이 일요일이 아니면 그 달 첫 주는 1일부터 그 주 토요일까지로 짧게 잡고(예: 1일이 화요일이면 화~토), 말일도 토요일이 아니면 마지막 주가 말일까지로 짧게 끝나요. 그 주의 소정근로시간(근무표의 고정 근무 시간)이 15시간 이상이고 근무표상 근무일에 모두 출근하면 (그 주 실근무시간 ÷ 40) × 8시간 × 시급. 아직 끝나지 않은 주는 빠져요. 금액에 마우스를 올리면 주별 내역이 보여요.<br />
       수당(교육수당·특근수당 등)은 이름 옆 <b>명세서</b>를 눌러 입력해요.<br />
+      매니저(월급제)는 <b>명세서</b>에서 월급·식대와 세무사에게 받은 4대보험·근로소득세를 입력해요. 한 번 넣으면 다음 달에도 이어져요.<br />
       ${taxOn ? "세금: 소득세 3% + 지방소득세(소득세의 10%), 10원 미만 절사. 소득세가 1,000원 미만이면 공제하지 않아요." : "세금을 공제하지 않고 계산했어요."}`,
     )}
     ${renderPayslipModal()}`,
@@ -2678,6 +2822,32 @@ function exportLedger(button) {
       [10, 8, 9, 9, 12, 11, 10, 14, 10, 10, 14, 22],
     );
 
+    // 1-2. 직원 (월급제 · 4대보험)
+    const salaried = payrollFor(month, "").rows.filter((r) => r.salaried);
+    const stot = (k) => salaried.reduce((a, r) => a + (r[k] ?? 0), 0);
+    const wsS = salaried.length
+      ? sheet(
+          `${store_} ${y}년 ${m}월 급여대장 · 직원 (4대보험)`,
+          `기간 ${period}   ·   지급일 ${dot(payDateFor(month))}   ·   공제액은 세무사 금액을 앱에 입력한 값   ·   작성일 ${made}`,
+          ["이름", "기본급(월급)", "식대(비과세)", "기타수당", "지급총액(세전)", ...DED_KEYS.map(([, l]) => l), "공제합계", "실지급액(세후)", "비고"],
+          [
+            ...salaried.map((r) => [
+              cell(r.emp.name, st.name), cell(r.base, st.num), cell(r.meal, st.num), cell(r.extra, st.num), cell(r.gross, st.num),
+              ...DED_KEYS.map(([k]) => (r.ded ? cell(r.ded[k], st.num) : cell("", st.text))),
+              r.ded ? cell(r.dedTotal, st.num) : cell("", st.text),
+              r.ded ? cell(r.net, st.net) : cell("", st.text),
+              r.ded ? cell(memo(r), st.text) : cell("공제액 입력 필요 (세무사 계산)", st.note),
+            ]),
+            [
+              cell("합계", st.sumText), cell(stot("base"), st.sum), cell(stot("meal"), st.sum), cell(stot("extra"), st.sum), cell(stot("gross"), st.sum),
+              ...DED_KEYS.map(([k]) => cell(salaried.reduce((a, r) => a + (r.ded?.[k] ?? 0), 0), st.sum)),
+              cell(stot("dedTotal"), st.sum), cell(stot("net"), st.sum), cell("", st.sumText),
+            ],
+          ],
+          [10, 13, 12, 10, 14, 10, 10, 11, 10, 11, 10, 11, 14, 24],
+        )
+      : null;
+
     // 2. 날짜별 근무시간 (출근 기록 기준)
     const ts = timesheet(month, "").rows.filter((r) => !isManager(r.emp));
     const ws2 = sheet(
@@ -2716,10 +2886,14 @@ function exportLedger(button) {
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws1, "급여대장");
+    if (wsS) XLSX.utils.book_append_sheet(wb, wsS, "직원 (4대보험)");
     XLSX.utils.book_append_sheet(wb, ws2, "날짜별 근무시간");
     XLSX.utils.book_append_sheet(wb, ws3, "주휴수당 내역");
     const bytes = XLSX.write(wb, { bookType: "xlsx", type: "array" });
-    if (await saveXlsxBytes(new Uint8Array(bytes), `${store_} ${m}월.xlsx`)) showToast("엑셀 파일을 저장했어요", "ok");
+    if (!(await saveXlsxBytes(new Uint8Array(bytes), `${store_} ${m}월.xlsx`))) return;
+    const pending = salaried.filter((r) => !r.ded).map((r) => r.emp.name);
+    if (pending.length) uiAlert(`저장했어요. 다만 ${pending.join(", ")}님은 공제액이 아직 없어서 세후 금액이 비어 있어요.\n명세서에서 세무사 금액을 입력하면 채워져요.`);
+    else showToast("엑셀 파일을 저장했어요", "ok");
   });
 }
 
@@ -3563,7 +3737,7 @@ const TOURS = {
 };
 
 // 튜토리얼이 잠깐 펼쳐 보이는 화면 (끝나면 원래대로). hash 가 있으면 그 화면으로 갔다가 set 을 한다.
-const firstPayEmp = () => payrollFor(state.payroll.month, "").rows[0]?.emp.id ?? null;
+const firstPayEmp = () => payrollFor(state.payroll.month, "").rows.find((r) => !r.salaried)?.emp.id ?? null;
 const closeTourShare = () => document.querySelectorAll(".share-back [data-share=close]").forEach((b) => b.click());
 function tourSlot(add) {
   const wd = isDesktop() ? 1 : state.schedDay ?? weekdayOf(todayDateString());
@@ -3578,8 +3752,7 @@ function tourSlot(add) {
 function tourPayslip() {
   const id = firstPayEmp();
   if (!id) return;
-  state.payslipId = id;
-  state.allowDraft = structuredClone(allowancesFor(state.payroll.month, id));
+  openPayslipState(id);
   // 보여 주기용 예시 수당 (저장하지 않음, 튜토리얼이 끝나면 사라짐)
   if (!state.allowDraft.length) state.allowDraft = [{ name: "특근수당", amount: 20000 }];
 }
@@ -4315,21 +4488,22 @@ app.addEventListener("click", (e) => {
       return;
     }
     case "open-payslip":
-      state.sheet = null; // 휴대폰: 급여 시트에서 명세서 창으로 넘어간다
       state.modalEnter = true;
-      state.payslipId = id;
-      state.allowDraft = structuredClone(allowancesFor(state.payroll.month, id));
+      openPayslipState(id);
       break;
     case "close-payslip":
       state.payslipId = null;
       state.allowDraft = null;
+      state.salDraft = null;
       break;
     case "save-payslip":
       setAllowances(state.payroll.month, state.payslipId, state.allowDraft.filter((a) => a.name || a.amount));
+      if (state.salDraft) setSalary(state.payslipId, state.payroll.month, normalizeSalary(state.salDraft));
       save();
-      queueToast("수당을 저장했어요");
+      queueToast(state.salDraft ? `저장했어요. ${Number(state.payroll.month.slice(5, 7))}월부터 다음 달에도 같은 금액으로 들어가요` : "수당을 저장했어요");
       state.payslipId = null;
       state.allowDraft = null;
+      state.salDraft = null;
       break;
     case "add-allowance":
       state.allowDraft.push({ name: "", amount: 0 });
@@ -4492,6 +4666,14 @@ app.addEventListener("change", (e) => {
     const meta = (work.meta = structuredClone(work.meta ?? store.scheduleMeta ?? { notes: {} }));
     if (t.dataset.meta) meta[t.dataset.meta] = t.value.trim();
     else meta.notes = { ...meta.notes, [t.dataset.note]: t.value.trim() };
+    render();
+    return;
+  }
+  if (t.dataset.sal) {
+    const [k, sub] = t.dataset.sal.split(".");
+    const v = t.value.replace(/\D/g, "") === "" ? null : parseMoney(t.value);
+    if (sub) state.salDraft.ded[sub] = v;
+    else state.salDraft[k] = v ?? 0;
     render();
     return;
   }
@@ -4677,8 +4859,8 @@ function flattenStore(withPrivate) {
     if (Object.keys(byEmp ?? {}).length) out[`public/shifts/${date}`] = JSON.stringify(byEmp);
   }
   if (withPrivate) {
-    const { scheduleMeta, settings, allowances, scheduleDraft, absent } = store;
-    out["private/main"] = JSON.stringify({ scheduleMeta, settings, allowances, scheduleDraft, absent });
+    const { scheduleMeta, settings, allowances, scheduleDraft, absent, salary } = store;
+    out["private/main"] = JSON.stringify({ scheduleMeta, settings, allowances, scheduleDraft, absent, salary });
   }
   return out;
 }
@@ -4758,7 +4940,7 @@ function cleanStore(data) {
   for (const [k, v] of Object.entries(data.absent && typeof data.absent === "object" ? data.absent : {})) {
     if (v && /^[A-Za-z0-9_-]{1,64}\|\d{4}-\d{2}-\d{2}$/.test(k)) absent[k] = true;
   }
-  return { ...data, employees, records, shifts, absent };
+  return { ...data, employees, records, shifts, absent, salary: cleanSalary(data.salary) };
 }
 
 function parse(json, fallback) {
@@ -4791,6 +4973,7 @@ function storeFromRemote() {
     scheduleMeta: main.scheduleMeta ?? store.scheduleMeta,
     settings: main.settings,
     allowances: main.allowances,
+    salary: main.salary ?? store.salary,
     scheduleDraft: main.scheduleDraft,
     absent: parse(pub.absent, null) ?? main.absent,
     // 이미 정리된 데이터이므로 예전 데이터 정리는 다시 하지 않는다
