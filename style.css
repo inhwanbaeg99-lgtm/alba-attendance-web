@@ -5717,3 +5717,48 @@ body.sc-drag-resize * {
 .toast {
   pointer-events: none;
 }
+
+/* 근무표 편집 창: 흰 창 안에서 입력칸이 또렷하게 */
+.slot-pop .sched-panel {
+  background: var(--paper);
+}
+.slot-pop .slot-form .field {
+  height: 44px;
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  text-align: center;
+  transition: box-shadow 0.12s, background 0.12s;
+}
+.slot-pop .slot-form select.field {
+  text-align: left;
+}
+.slot-pop .slot-form .field::placeholder {
+  color: var(--ink);
+  opacity: 0.85;
+}
+.slot-pop .slot-form .field:hover {
+  box-shadow: inset 0 0 0 1px var(--grid);
+}
+.slot-pop .slot-form .field:focus {
+  background: var(--paper);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.slot-pop .slot-form .field:focus::placeholder {
+  opacity: 0.35;
+}
+.slot-pop .slot-form .edit-row {
+  align-items: center;
+  gap: 8px;
+}
+.slot-pop .slot-form .edit-row span {
+  color: var(--ink-sub);
+}
+.slot-pop .slot-form .btn-ghost {
+  background: var(--bg);
+}
+.slot-pop .slot-remove {
+  background: none !important;
+}
