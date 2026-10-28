@@ -5949,3 +5949,26 @@ body.sc-drag-resize * {
 .scs-block small {
   line-height: 1.3;
 }
+
+/* 급여 정산 표: 좌우 스크롤 없이 한 박스에 (화면이 좁으면 칸 여백·글자를 줄인다) */
+@media (min-width: 768px) {
+  .pay-wrap {
+    overflow-x: visible;
+  }
+  .pay-table th,
+  .pay-table td {
+    padding-left: clamp(3px, 0.9vw, 16px);
+    padding-right: clamp(3px, 0.9vw, 16px);
+  }
+  .pay-table th {
+    font-size: clamp(11px, 1.05vw, 13px);
+  }
+  .pay-table td {
+    font-size: clamp(11px, 1.15vw, 14px);
+    letter-spacing: -0.01em;
+  }
+  .pay-table .pay-tag {
+    margin-left: 2px;
+    padding: 1px 4px;
+  }
+}
