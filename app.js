@@ -2850,16 +2850,25 @@ function exportLedger(button) {
 
     // 2. 날짜별 근무시간 (출근 기록 기준)
     const ts = timesheet(month, "").rows.filter((r) => !isManager(r.emp));
+    // 매니저는 출근을 안 찍으므로 근무표대로 (출근 기록이 있으면 기록으로) — 알바 아래에
+    for (const emp of store.employees.filter((e) => e.active && isManager(e))) {
+      const recs = monthRecords(month, emp.id);
+      const cells = days.map((d) => {
+        const mine = recs.filter((x) => x.date === d && x.clockOut);
+        return mine.length ? mine.reduce((a, x) => a + hoursBetween(x.clockIn, x.clockOut), 0) : plannedHours(emp, [d]);
+      });
+      ts.push({ emp, cells, total: cells.reduce((a, h) => a + h, 0), manager: true });
+    }
     const ws2 = sheet(
       `${store_} ${y}년 ${m}월 날짜별 근무시간`,
-      "단위: 시간   ·   출근 기록 기준",
+      "단위: 시간   ·   출근 기록 기준 (매니저는 근무표 기준)",
       ["이름", ...days.map((d) => `${Number(d.slice(8))}\n${WEEKDAYS[weekdayOf(d)]}`), "일수", "시간"],
       ts.map((r) => [
-        cell(r.emp.name, st.name),
+        cell(r.manager ? `${r.emp.name} (매니저)` : r.emp.name, st.name),
         ...r.cells.map((h, i) => cell(h ? Number(h.toFixed(2)) : "", weekdayOf(days[i]) === 0 ? st.sun : st.mid)),
         cell(r.cells.filter((h) => h).length, st.num), cell(Number(r.total.toFixed(2)), st.dec),
       ]),
-      [10, ...days.map(() => 4.5), 6, 7],
+      [15, ...days.map(() => 4.5), 6, 7],
       [st.head, ...days.map((d) => (weekdayOf(d) === 0 ? st.headSun : st.head)), st.head, st.head],
     );
 
