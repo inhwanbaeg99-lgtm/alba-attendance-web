@@ -1495,6 +1495,7 @@ function renderRecordsMobile() {
     <div class="m-btns">
       <button type="button" class="btn-ghost" data-action="save-xlsx-template" title="매장 엑셀 양식(\"N월 근로현황\" 시트가 있는 파일)을 골라 이 브라우저에 저장해요">엑셀 양식 저장</button>
       <button type="button" class="btn-ghost" data-action="fill-template-xlsx"${recs.length ? "" : " disabled"} title="저장한 엑셀 양식에 이 달 근무·급여를 채운 새 파일을 받아요">엑셀로 옮기기</button>
+      <button type="button" class="btn-ghost" data-action="export-ledger"${recs.length ? "" : " disabled"}>엑셀 파일</button>
       <button type="button" class="btn-primary" data-action="payslip-pdf-all"${rows.length ? "" : " disabled"}>명세서 PDF 전체</button>
     </div>
     ${renderPayslipModal()}`,
@@ -1916,6 +1917,7 @@ function renderRecords() {
         ${employeeId ? `<button type="button" class="pill" data-action="share-ts-image" data-id="${employeeId}">카카오톡 전송하기</button>` : ""}
         <button type="button" class="pill plain-dark" data-action="save-xlsx-template" title="매장 엑셀 양식(\"N월 근로현황\" 시트가 있는 파일)을 골라 이 브라우저에 저장해요">엑셀 양식 저장</button>
         <button type="button" class="pill plain-dark" data-action="fill-template-xlsx"${recs.length ? "" : " disabled"} title="저장한 엑셀 양식에 이 달 근무·급여를 채운 새 파일을 받아요">엑셀로 옮기기</button>
+        <button type="button" class="pill plain-dark" data-action="export-ledger"${recs.length ? "" : " disabled"} title="급여대장 · 날짜별 근무시간 · 주휴수당 내역이 들어간 엑셀 파일">엑셀 파일</button>
       </div>
     </div>
     ${renderTimesheet(month, employeeId)}
@@ -1952,6 +1954,7 @@ function renderRecords() {
 const LIBS = {
   fflate: { src: "https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js", ready: () => window.fflate },
   html2canvas: { src: "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js", ready: () => window.html2canvas },
+  xlsx: { src: "https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js", ready: () => window.XLSX },
   jspdf: { src: "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js", ready: () => window.jspdf?.jsPDF },
 };
 
@@ -2607,6 +2610,117 @@ function fillScheduleSheet(fflate, zip, month) {
   zip[path] = fflate.strToU8(xml);
   zip["xl/workbook.xml"] = fflate.strToU8(wbXml);
   zip["xl/sharedStrings.xml"] = fflate.strToU8(sst.xml);
+}
+
+
+// ---------- 엑셀 파일: 급여대장 (양식 없이 바로 받기) ----------
+// 한 파일에 시트 3개: 급여대장 · 날짜별 근무시간 · 주휴수당 내역. 숫자는 앱 명세서와 같다.
+function exportLedger(button) {
+  return withBusy(button, "만드는 중…", async () => {
+    const XLSX = await loadLib("xlsx");
+    const { month } = state.payroll;
+    const [y, m] = month.split("-").map(Number);
+    const rows = payrollFor(month, "").rows.filter((r) => !isManager(r.emp));
+    if (!rows.length) throw new Error("이 달에는 급여를 계산할 직원이 없어요.");
+    const days = monthDays(month);
+    const period = `${dot(days[0])} ~ ${dot(days[days.length - 1])}`;
+    const made = dot(todayDateString());
+    const store_ = storeName();
+
+    const C = { line: { style: "thin", color: { rgb: "D5DCDA" } } };
+    const border = { top: C.line, bottom: C.line, left: C.line, right: C.line };
+    const st = {
+      title: { font: { bold: true, sz: 14 } },
+      meta: { font: { color: { rgb: "66736F" } } },
+      head: { font: { bold: true }, fill: { fgColor: { rgb: "E2F4F2" } }, alignment: { horizontal: "center", vertical: "center", wrapText: true }, border },
+      text: { border },
+      name: { font: { bold: true }, border },
+      num: { numFmt: "#,##0", alignment: { horizontal: "right" }, border },
+      dec: { numFmt: "#,##0.##", alignment: { horizontal: "right" }, border },
+      net: { numFmt: "#,##0", font: { bold: true, color: { rgb: "0E8F8A" } }, alignment: { horizontal: "right" }, border },
+      sum: { numFmt: "#,##0", font: { bold: true }, fill: { fgColor: { rgb: "F3F6F5" } }, alignment: { horizontal: "right" }, border },
+      sumText: { font: { bold: true }, fill: { fgColor: { rgb: "F3F6F5" } }, border },
+      note: { font: { color: { rgb: "B45309" } }, border },
+      mid: { alignment: { horizontal: "center" }, border },
+      sun: { font: { color: { rgb: "D64545" } }, alignment: { horizontal: "center" }, border },
+      headSun: { font: { bold: true, color: { rgb: "D64545" } }, fill: { fgColor: { rgb: "E2F4F2" } }, alignment: { horizontal: "center", wrapText: true }, border },
+    };
+    const cell = (v, s) => ({ v: v ?? "", t: typeof v === "number" ? "n" : "s", s });
+    // 시트 만들기: 제목·기간 줄 + 표. widths = 열 너비(글자 수)
+    const sheet = (title, meta, head, body, widths, headStyles) => {
+      const aoa = [[cell(title, st.title)], [cell(meta, st.meta)], [], head.map((h, i) => cell(h, headStyles?.[i] ?? st.head)), ...body];
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws["!cols"] = widths.map((w) => ({ wch: w }));
+      ws["!rows"] = [{ hpt: 24 }, {}, {}, { hpt: 30 }];
+      return ws;
+    };
+    const tot = (k) => rows.reduce((a, r) => a + (r[k] ?? 0), 0);
+    const memo = (r) => r.allowances.filter((a) => a.name && Number(a.amount)).map((a) => `${a.name} ${Number(a.amount).toLocaleString()}`).join(", ");
+
+    // 1. 급여대장
+    const taxNote = store.settings?.tax === "none" ? "세금 공제 안 함" : "세금 3.3% (소득세 3% + 지방소득세 0.3%)";
+    const ws1 = sheet(
+      `${store_} ${y}년 ${m}월 급여대장`,
+      `기간 ${period}   ·   지급일 ${dot(payDateFor(month))}   ·   ${taxNote}   ·   작성일 ${made}`,
+      ["이름", "근무일수", "근무시간", "시급", "기본급", "주휴수당", "기타수당", "지급총액(세전)", "소득세", "지방소득세", "실지급액(세후)", "비고"],
+      [
+        ...rows.map((r) => [
+          cell(r.emp.name, st.name), cell(r.days, st.num), cell(Number(r.hours.toFixed(2)), st.dec), cell(r.emp.hourlyWage, st.num),
+          cell(r.base, st.num), cell(r.weekly.total, st.num), cell(r.extra, st.num), cell(r.gross, st.num),
+          cell(r.income, st.num), cell(r.local, st.num), cell(r.net, st.net), cell(memo(r), st.text),
+        ]),
+        [
+          cell("합계", st.sumText), cell(tot("days"), st.sum), cell(Number(tot("hours").toFixed(2)), st.sum), cell("", st.sumText),
+          cell(tot("base"), st.sum), cell(rows.reduce((a, r) => a + r.weekly.total, 0), st.sum), cell(tot("extra"), st.sum), cell(tot("gross"), st.sum),
+          cell(tot("income"), st.sum), cell(tot("local"), st.sum), cell(tot("net"), st.sum), cell("", st.sumText),
+        ],
+      ],
+      [10, 8, 9, 9, 12, 11, 10, 14, 10, 10, 14, 22],
+    );
+
+    // 2. 날짜별 근무시간 (출근 기록 기준)
+    const ts = timesheet(month, "").rows.filter((r) => !isManager(r.emp));
+    const ws2 = sheet(
+      `${store_} ${y}년 ${m}월 날짜별 근무시간`,
+      "단위: 시간   ·   출근 기록 기준",
+      ["이름", ...days.map((d) => `${Number(d.slice(8))}\n${WEEKDAYS[weekdayOf(d)]}`), "일수", "시간"],
+      ts.map((r) => [
+        cell(r.emp.name, st.name),
+        ...r.cells.map((h, i) => cell(h ? Number(h.toFixed(2)) : "", weekdayOf(days[i]) === 0 ? st.sun : st.mid)),
+        cell(r.cells.filter((h) => h).length, st.num), cell(Number(r.total.toFixed(2)), st.dec),
+      ]),
+      [10, ...days.map(() => 4.5), 6, 7],
+      [st.head, ...days.map((d) => (weekdayOf(d) === 0 ? st.headSun : st.head)), st.head, st.head],
+    );
+
+    // 3. 주휴수당 내역
+    const ws3 = sheet(
+      `${store_} ${y}년 ${m}월 주휴수당 내역`,
+      "주휴시간 = 실근무시간(최대 40시간) ÷ 5 · 소정근로 15시간 이상, 그 주 결근 없음 · 주는 일~토 (달이 바뀌면 끊어서 계산)",
+      ["이름", "주", "소정근로시간", "실근무시간", "주휴시간", "주휴수당", "안 붙은 이유"],
+      rows
+        .flatMap((r) =>
+          r.weekly.weeks.map((w, i) => [
+            cell(i ? "" : r.emp.name, st.name),
+            cell(`${shortDate(w.mon)} ~ ${shortDate(w.sun)}`, st.mid),
+            cell(Number(w.planned.toFixed(2)), st.dec),
+            cell(Number(w.hours.toFixed(2)), st.dec),
+            cell(Number(w.allowHours.toFixed(2)), st.dec),
+            cell(w.amount, st.num),
+            cell(w.reason, w.reason ? st.note : st.text),
+          ]),
+        )
+        .concat([[cell("합계", st.sumText), cell("", st.sumText), cell("", st.sumText), cell("", st.sumText), cell("", st.sumText), cell(rows.reduce((a, r) => a + r.weekly.total, 0), st.sum), cell("", st.sumText)]]),
+      [10, 18, 12, 10, 9, 11, 22],
+    );
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws1, "급여대장");
+    XLSX.utils.book_append_sheet(wb, ws2, "날짜별 근무시간");
+    XLSX.utils.book_append_sheet(wb, ws3, "주휴수당 내역");
+    const bytes = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    if (await saveXlsxBytes(new Uint8Array(bytes), `${store_} ${m}월.xlsx`)) showToast("엑셀 파일을 저장했어요", "ok");
+  });
 }
 
 // 풀어놓은 기본양식(zip)을 이 달에 맞게 바꾸고, 근무표·근무시간·수당을 채운다.
@@ -3425,6 +3539,7 @@ const TOURS = {
           { sel: "#r-tax", title: "세금", text: "보통 3.3%를 떼요. 떼지 않으면 <b>공제 안 함</b>으로 바꿔요." },
           { sel: "[data-action=save-xlsx-template]", title: "엑셀 양식 저장", text: "매장에서 쓰는 급여 엑셀 양식을 한 번 저장해 둬요." },
           { sel: "[data-action=fill-template-xlsx]", title: "엑셀로 옮기기", text: "저장한 양식에 이번 달 근무·급여를 채운 엑셀 파일을 만들어요." },
+          { sel: "[data-action=export-ledger]", title: "엑셀 파일", text: "양식 없이 바로 받는 엑셀이에요. <b>급여대장 · 날짜별 근무시간 · 주휴수당 내역</b>이 한 파일에 들어가요." },
           { sel: ".pay-table", title: "급여 정산", text: "기본급, 주휴수당, 수당, 세금, 실지급액이 계산돼요. 주휴수당에 마우스를 올리면 주별 내역이 보여요." },
           { sel: ".pay-table .ps-cell [data-action=open-payslip]", title: "명세서", text: "이름 옆 <b>명세서</b>를 누르면 명세서 창이 열려요." },
           { scene: "payslip", sel: ".ps-allow", title: "수당 입력", text: "특근수당 같은 수당을 이름과 금액으로 넣어요. <b>+ 수당 추가</b>로 여러 개 넣을 수 있어요." },
@@ -4025,6 +4140,9 @@ app.addEventListener("click", (e) => {
       input.focus({ preventScroll: true });
       return;
     }
+    case "export-ledger":
+      exportLedger(el);
+      return;
     case "fill-template-xlsx":
       fillTemplateXlsx(el);
       return;
