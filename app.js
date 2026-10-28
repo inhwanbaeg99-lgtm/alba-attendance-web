@@ -2890,10 +2890,16 @@ function exportLedger(button) {
       const r = XLSX.utils.decode_range(ws["!ref"]);
       // 제목·기간 줄은 표 너비만큼 합쳐서 글자가 잘리지 않게
       ws["!merges"] = [0, 1].map((row) => ({ s: { r: row, c: 0 }, e: { r: row, c: r.e.c } }));
-      for (let R = r.s.r; R <= r.e.r; R++) {
-        for (let C = r.s.c; C <= r.e.c; C++) {
+      // 표 바깥도 오른쪽 8칸 · 아래 40줄까지 흰 칸(옅은 칸 선)으로 채워서, 어두운 화면에서도 빈 엑셀 칸처럼 보이게
+      const grid = { style: "thin", color: { rgb: "FFE5E8EB" } };
+      const blank = { fill: { patternType: "solid", fgColor: { rgb: "FFFFFFFF" } }, border: { top: grid, bottom: grid, left: grid, right: grid } };
+      const lastR = r.e.r + 40;
+      const lastC = r.e.c + 8;
+      for (let R = r.s.r; R <= lastR; R++) {
+        for (let C = r.s.c; C <= lastC; C++) {
           const ref = XLSX.utils.encode_cell({ r: R, c: C });
-          const c = (ws[ref] = ws[ref] ?? { t: "s", v: "" });
+          const inTable = R <= r.e.r && C <= r.e.c;
+          const c = (ws[ref] = ws[ref] ?? { t: "s", v: "", s: inTable ? undefined : blank });
           const st0 = c.s ?? {};
           c.s = {
             ...st0,
@@ -2902,6 +2908,7 @@ function exportLedger(button) {
           };
         }
       }
+      ws["!ref"] = XLSX.utils.encode_range({ s: r.s, e: { r: lastR, c: lastC } });
     };
     [ws1, wsS, ws2, ws3].forEach(paint);
     const wb = XLSX.utils.book_new();
