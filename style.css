@@ -5805,7 +5805,7 @@ body.sc-drag-resize * {
   top: 0;
 }
 .scs {
-  width: 980px;
+  width: 1080px;
   padding: 36px 24px 24px;
   background: #ffffff;
   color: #191f28;
@@ -5920,7 +5920,8 @@ body.sc-drag-resize * {
 .scs-block b {
   font-size: 14px;
   font-weight: 800;
-  letter-spacing: -0.04em !important;
+  /* 백 인 환 처럼 글자 사이를 띄운다 */
+  letter-spacing: 0.16em !important;
   line-height: 1.2;
   white-space: nowrap;
 }
