@@ -3419,14 +3419,15 @@ function renderScheduleSheet({ wide = false } = {}) {
                 ? (who.start === row.start ? `<i class="sc-grip top" data-grip="start" data-html2canvas-ignore></i>` : "") +
                   (who.end === end ? `<i class="sc-grip bot" data-grip="end" data-html2canvas-ignore></i>` : "")
                 : "";
-              return `<td class="sc-name${editing ? " sc-editing" : ""}" ${slot} data-id="${who.emp.id}"${span} style="background:${bg};color:${textOn(bg)}"${compact ? ` title="${esc(schedName(who.emp))}" aria-label="${esc(schedName(who.emp))}"` : ""}>${label}${grip}</td>`;
+              const dropped = state.schedDropped && String(state.schedDropped.wd) === String(d.wd) && state.schedDropped.id === who.emp.id;
+              return `<td class="sc-name${editing ? " sc-editing" : ""}${dropped ? " sc-landed" : ""}" ${slot} data-id="${who.emp.id}"${span} style="background:${bg};color:${textOn(bg)}"${compact ? ` title="${esc(schedName(who.emp))}" aria-label="${esc(schedName(who.emp))}"` : ""}>${label}${grip}</td>`;
             })
             .join(""),
         )
         .join("");
       // 시간 칸: "7:00 ~ 8:00" (휴대폰은 칸이 좁아 "7~8")
       const time = compact ? `${shortTime(fromMin(row.start))}~${shortTime(fromMin(row.end))}` : `${fromMin(row.start)} ~ ${fromMin(row.end)}`;
-      return `<tr><td class="sc-time">${time}</td>${cells}</tr>`;
+      return `<tr data-rs="${row.start}" data-re="${row.end}"><td class="sc-time">${time}</td>${cells}</tr>`;
     })
     .join("");
 
@@ -4015,45 +4016,87 @@ var schedDrag = null;
 var schedNoClick = false;
 const padTime = (min) => fromMin(min).padStart(5, "0");
 
-function schedDragApply(target) {
+// 끄는 동안에는 표를 다시 그리지 않고, 놓일 자리만 미리보기 상자로 보여 준다 (놓을 때 한 번 반영)
+function schedDragRange(target, clientY) {
   const d = schedDrag;
-  state.schedWork.weekly = structuredClone(d.base);
   const emp = employeeById(d.empId);
-  if (!emp) return;
-  const cur = (wd) => effWeekly(emp)[wd];
-  if (d.kind === "add" || d.kind === "move") {
-    if (!target) {
-      if (d.kind === "move") draftWeekly(emp, d.wd, null);
-      return;
+  if (d.kind === "resize") {
+    const had = effWeekly(emp)[d.wd];
+    const row = [...document.querySelectorAll("#sched-sheet tr[data-rs]")].find((tr) => {
+      const r = tr.getBoundingClientRect();
+      return clientY < r.bottom;
+    }) ?? document.querySelector("#sched-sheet tbody tr:last-child");
+    if (!had || !row) return d.range;
+    let start = toMin(had.start);
+    let end = toMin(had.end);
+    if (d.grip === "end") end = Math.max(Number(row.dataset.re), start + 30);
+    else start = Math.min(Number(row.dataset.rs), end - 30);
+    return { wd: d.wd, start, end };
+  }
+  if (!target) return null;
+  const wd = target.dataset.wd;
+  const tStart = Number(target.dataset.start);
+  let start = d.kind === "add" ? tStart : Math.max(0, tStart - d.offset);
+  let end = Math.min(d.kind === "add" ? Math.floor(tStart / 60) * 60 + 60 : start + d.dur, 24 * 60 - 1);
+  const had = d.kind === "move" && wd === d.wd ? null : effWeekly(emp)[wd];
+  if (had) {
+    start = Math.min(start, toMin(had.start));
+    end = Math.max(end, toMin(had.end));
+  }
+  return { wd, start, end };
+}
+
+// 표 안에서 그 시각의 세로 위치 (행 중간 시각이면 비례해서)
+function schedYAt(min) {
+  const rows = [...document.querySelectorAll("#sched-sheet tr[data-rs]")];
+  for (const tr of rows) {
+    const rs = Number(tr.dataset.rs);
+    const re = Number(tr.dataset.re);
+    if (min >= rs && min <= re) {
+      const r = tr.getBoundingClientRect();
+      return r.top + ((min - rs) / (re - rs)) * r.height;
     }
-    const tStart = Number(target.dataset.start);
-    let start;
-    let end;
-    if (d.kind === "add") {
-      start = tStart;
-      end = Math.floor(tStart / 60) * 60 + 60;
-    } else {
-      start = Math.max(0, tStart - d.offset);
-      end = start + d.dur;
-    }
-    end = Math.min(end, 24 * 60 - 1);
-    if (d.kind === "move") draftWeekly(emp, d.wd, null);
-    const had = cur(target.dataset.wd);
-    if (had) {
-      start = Math.min(start, toMin(had.start));
-      end = Math.max(end, toMin(had.end));
-    }
-    draftWeekly(emp, target.dataset.wd, { start: padTime(start), end: padTime(end) });
+  }
+  const last = rows[rows.length - 1]?.getBoundingClientRect();
+  return min <= Number(rows[0]?.dataset.rs ?? 0) ? rows[0]?.getBoundingClientRect().top ?? 0 : last?.bottom ?? 0;
+}
+
+function schedShowPreview(target) {
+  const d = schedDrag;
+  const box = document.getElementById("sched-solo");
+  if (!box) return;
+  let pv = document.getElementById("sc-preview");
+  if (!d.range) {
+    pv?.classList.remove("on");
     return;
   }
-  // 늘이기 · 줄이기: 같은 요일 안에서만
-  const had = cur(d.wd);
-  if (!target || !had || target.dataset.wd !== d.wd) return;
-  let start = toMin(had.start);
-  let end = toMin(had.end);
-  if (d.grip === "end") end = Math.max(Number(target.dataset.end), start + 30);
-  else start = Math.min(Number(target.dataset.start), end - 30);
-  draftWeekly(emp, d.wd, { start: padTime(start), end: padTime(end) });
+  // 가로: 늘이기는 그 사람 칸, 넣기·옮기기는 손가락이 있는 칸
+  const col =
+    d.kind === "resize"
+      ? document.querySelector(`#sched-sheet td[data-wd="${d.wd}"][data-id="${d.empId}"]`)
+      : target;
+  if (!col) return;
+  const b = box.getBoundingClientRect();
+  const c = col.getBoundingClientRect();
+  const top = schedYAt(d.range.start);
+  const bottom = schedYAt(d.range.end);
+  if (!pv) {
+    const emp = employeeById(d.empId);
+    const bg = cssColor(emp.color);
+    pv = Object.assign(document.createElement("div"), { id: "sc-preview", className: "sc-preview" });
+    pv.style.cssText = `background:${bg};color:${textOn(bg)}`;
+    pv.innerHTML = `<b>${esc(schedName(emp))}</b><span></span>`;
+    box.appendChild(pv);
+    // 처음 나타날 때는 제자리에서 (날아오지 않게)
+    pv.style.transition = "none";
+    requestAnimationFrame(() => (pv.style.transition = ""));
+  }
+  pv.style.left = `${c.left - b.left}px`;
+  pv.style.width = `${c.width}px`;
+  pv.style.top = `${top - b.top + 1}px`;
+  pv.style.height = `${Math.max(16, bottom - top - 2)}px`;
+  pv.querySelector("span").textContent = `${padTime(d.range.start)} ~ ${padTime(d.range.end)}`;
+  pv.classList.add("on");
 }
 
 document.addEventListener("pointerdown", (e) => {
@@ -4070,10 +4113,12 @@ document.addEventListener("pointerdown", (e) => {
   schedDrag = {
     kind: chip ? "add" : grip ? "resize" : "move",
     grip: grip?.dataset.grip,
+    chip,
     empId,
     wd,
     offset: had ? Number(cell.dataset.start) - toMin(had.start) : 0,
     dur: had ? toMin(had.end) - toMin(had.start) : 60,
+    range: had ? { wd, start: toMin(had.start), end: toMin(had.end) } : null,
     x: e.clientX,
     y: e.clientY,
     started: false,
@@ -4085,7 +4130,7 @@ document.addEventListener("pointermove", (e) => {
   const d = schedDrag;
   if (!d) return;
   if (!d.started) {
-    if (Math.hypot(e.clientX - d.x, e.clientY - d.y) < 5) return;
+    if (Math.hypot(e.clientX - d.x, e.clientY - d.y) < 4) return;
     d.started = true;
     // 열려 있던 편집 창은 입력한 대로 두고 닫는다
     if (state.slotEdit) {
@@ -4094,8 +4139,11 @@ document.addEventListener("pointermove", (e) => {
       state.error = "";
       render();
     }
-    d.base = structuredClone(schedWork().weekly);
-    document.body.classList.add("sc-dragging");
+    document.body.classList.add("sc-dragging", `sc-drag-${d.kind}`);
+    // 꺼낸 이름은 놓을 때까지 이름 줄에서 숨긴다
+    document.querySelector(`[data-chip="${d.empId}"]`)?.classList.add("sc-lifted");
+    // 옮기기·늘이기: 원래 칸은 흐리게
+    document.querySelectorAll(`#sched-sheet td[data-wd="${d.wd}"][data-id="${d.empId}"]`).forEach((x) => x.classList.add("sc-lift"));
     if (d.kind !== "resize") {
       const emp = employeeById(d.empId);
       const bg = cssColor(emp.color);
@@ -4104,30 +4152,36 @@ document.addEventListener("pointermove", (e) => {
       document.body.appendChild(d.ghost);
     }
   }
-  if (d.ghost) d.ghost.style.transform = `translate(${e.clientX + 12}px, ${e.clientY + 12}px)`;
-  const target = document.elementFromPoint(e.clientX, e.clientY)?.closest("#sched-sheet td[data-wd]") ?? null;
-  const key = target ? `${target.dataset.wd}|${target.dataset.start}|${target.dataset.end}` : "";
-  if (key === d.key) return;
-  d.key = key;
-  schedDragApply(target);
-  refreshSchedule();
-  document.querySelectorAll("#sched-sheet td.sc-drop").forEach((x) => x.classList.remove("sc-drop"));
-  if (target) document.querySelector(`#sched-sheet td[data-wd="${target.dataset.wd}"][data-id="${d.empId}"]`)?.classList.add("sc-drop");
-  document.getElementById("sched-tray")?.classList.toggle("sc-out", !target && d.kind === "move");
+  const target = d.kind === "resize" ? null : document.elementFromPoint(e.clientX, e.clientY)?.closest("#sched-sheet td[data-wd]") ?? null;
+  if (d.ghost) {
+    d.ghost.style.transform = `translate(${e.clientX - d.ghost.offsetWidth / 2}px, ${e.clientY - d.ghost.offsetHeight / 2}px)`;
+    d.ghost.classList.toggle("over", Boolean(target));
+  }
+  d.range = schedDragRange(target, e.clientY);
+  schedShowPreview(target);
+  d.out = d.kind === "move" && !target;
+  document.getElementById("sched-tray")?.classList.toggle("sc-out", d.out);
 });
 
-document.addEventListener("pointerup", () => {
+function schedDragEnd() {
   const d = schedDrag;
   schedDrag = null;
   if (!d?.started) return;
   d.ghost?.remove();
-  document.body.classList.remove("sc-dragging");
+  document.getElementById("sc-preview")?.remove();
+  document.body.classList.remove("sc-dragging", `sc-drag-${d.kind}`);
   schedNoClick = true;
   setTimeout(() => (schedNoClick = false), 0);
   const emp = employeeById(d.empId);
-  if (!d.key && d.kind === "move") showToast(`${WEEKDAYS[d.wd]}요일 ${schedName(emp)} 근무를 뺐어요`);
+  if (d.kind === "move") draftWeekly(emp, d.wd, null);
+  if (d.range && !(d.kind === "move" && d.out)) draftWeekly(emp, d.range.wd, { start: padTime(d.range.start), end: padTime(d.range.end) });
+  if (d.kind === "move" && d.out) showToast(`${WEEKDAYS[d.wd]}요일 ${schedName(emp)} 근무를 뺐어요`);
+  state.schedDropped = d.range && !d.out ? { wd: d.range.wd, id: d.empId } : null;
   render();
-});
+  state.schedDropped = null;
+}
+document.addEventListener("pointerup", schedDragEnd);
+document.addEventListener("pointercancel", schedDragEnd);
 
 document.addEventListener(
   "click",

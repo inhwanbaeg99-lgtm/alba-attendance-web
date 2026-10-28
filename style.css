@@ -5507,7 +5507,7 @@ td.name {
 /* 근무표 (PC): 가운데 표 + 아래 이름 줄에서 끌어다 놓기 + 칸 옆에 뜨는 편집 창 */
 .sched-solo {
   position: relative;
-  max-width: 1120px;
+  max-width: 1168px;
   margin: 0 auto;
 }
 .sched-solo #sched-status .sched-status {
@@ -5636,4 +5636,71 @@ td.sc-name:hover .sc-grip::after {
   background: var(--bg);
   border: 1px solid var(--line);
   box-shadow: 0 12px 32px rgb(0 0 0 / 0.14);
+}
+
+/* 끄는 동안: 꺼낸 이름 숨김, 원래 칸 흐리게, 놓일 자리 미리보기 */
+.sc-chip.sc-lifted {
+  opacity: 0;
+  transform: scale(0.85);
+  transition: opacity 0.12s, transform 0.12s;
+}
+.sched-solo #sched-sheet td.sc-lift {
+  opacity: 0.3;
+  transition: opacity 0.12s;
+}
+.sc-ghost {
+  transition: opacity 0.12s, scale 0.12s;
+}
+.sc-ghost.over {
+  opacity: 0;
+  scale: 0.8;
+}
+.sc-preview {
+  position: absolute;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  box-shadow: 0 0 0 2px var(--accent), 0 8px 20px rgb(0 0 0 / 0.16);
+  font-size: 13px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: top 0.09s ease-out, height 0.09s ease-out, left 0.09s ease-out, width 0.09s ease-out, opacity 0.1s;
+}
+.sc-preview.on {
+  opacity: 1;
+}
+.sc-preview b {
+  overflow: hidden;
+  max-width: 100%;
+  font-weight: 700;
+  text-overflow: ellipsis;
+}
+/* 시간은 상자 위에 작은 말풍선으로 (1시간짜리 칸에도 안 끼게) */
+.sc-preview span {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--ink);
+  color: var(--bg);
+  font-size: 12px;
+  font-weight: 700;
+}
+body.sc-drag-resize,
+body.sc-drag-resize * {
+  cursor: ns-resize !important;
+}
+@keyframes sc-land {
+  from {
+    filter: brightness(1.15);
+    box-shadow: inset 0 0 0 3px var(--accent);
+  }
+}
+.sched-solo #sched-sheet td.sc-landed {
+  animation: sc-land 0.6s ease-out;
 }
