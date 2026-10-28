@@ -3678,22 +3678,6 @@ function finishSlot() {
 }
 
 // ---------- 카톡 사진용 근무표 (캘린더 앱처럼: 한 사람의 근무 = 한 덩어리) ----------
-// 직원 색 → 연한 바탕 · 진한 띠 (html2canvas 가 color-mix 를 못 읽어서 직접 계산)
-function shareTint(color) {
-  const ctx = (shareTint.ctx ??= document.createElement("canvas").getContext("2d"));
-  ctx.fillStyle = "#ffffff";
-  ctx.fillStyle = cssColor(color);
-  const hex = ctx.fillStyle.startsWith("#") ? ctx.fillStyle : "#ffffff";
-  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
-  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  const mix = (k, base) => [r, g, b].map((c) => Math.round(c * k + base * (1 - k)));
-  // 흰색(매니저)·아주 연한 색은 회색 띠로
-  const strong = lum > 0.93 ? [139, 149, 161] : lum > 0.7 ? mix(0.72, 0) : [r, g, b];
-  const soft = lum > 0.93 ? [243, 244, 246] : mix(0.3, 255);
-  const rgb = (a) => `rgb(${a.join(",")})`;
-  return { soft: rgb(soft), strong: rgb(strong) };
-}
-
 function renderScheduleShareCard() {
   const { days } = scheduleLayout();
   const meta = schedMeta();
@@ -3717,13 +3701,16 @@ function renderScheduleShareCard() {
       const blocks = lanes
         .flatMap((lane, li) =>
           lane.map((p) => {
-            const { soft, strong } = shareTint(p.emp.color);
+            // 화면 근무표와 같은 직원 색 그대로 (흰색인 매니저만 연회색)
+            const own = cssColor(p.emp.color).toLowerCase();
+            const strong = own === "#ffffff" || own === "#fff" ? "#e5e8eb" : own;
+            const ink = textOn(strong);
             const h = ((p.end - p.start) / 60) * H;
             const ts = shortTime(fromMin(p.start).padStart(5, "0"));
             const te = shortTime(fromMin(p.end).padStart(5, "0"));
             // 22:30 처럼 분이 있으면 칸이 좁아서 두 줄로
             const time = ts.includes(":") || te.includes(":") ? `${ts}–<br />${te}` : `${ts}–${te}`;
-            return `<div class="scs-block${h < 70 ? " short" : ""}" style="top:${((p.start - first) / 60) * H + 2}px;height:${h - 4}px;left:calc(${w * li}% + 1px);width:calc(${w}% - 2px);background:${soft};border-left-color:${strong}"><b>${esc(schedName(p.emp))}</b><small>${time}</small></div>`;
+            return `<div class="scs-block${h < 70 ? " short" : ""}" style="top:${((p.start - first) / 60) * H + 2}px;height:${h - 4}px;left:calc(${w * li}% + 1px);width:calc(${w}% - 2px);background:${strong};color:${ink}"><b>${esc(schedName(p.emp))}</b><small>${time}</small></div>`;
           }),
         )
         .join("");
