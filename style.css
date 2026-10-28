@@ -5762,3 +5762,25 @@ body.sc-drag-resize * {
 .slot-pop .slot-remove {
   background: none !important;
 }
+
+/* 근무표: 요일 사이 간격 */
+.sched.modern .sc-gap {
+  width: 6px;
+  min-width: 6px;
+  padding: 0;
+  background: none !important;
+  box-shadow: none !important;
+  pointer-events: none;
+}
+/* 이름을 눌러 고치는 중: 그 근무만 또렷하게, 나머지는 살짝 흐리게 */
+.sched.modern td.sc-name {
+  transition: filter 0.18s, opacity 0.18s;
+}
+.sched.modern.sc-focus td.sc-name:not(.sc-editing) {
+  filter: blur(1.2px);
+  opacity: 0.55;
+}
+.sched-sheet.capturing .sched.modern.sc-focus td.sc-name {
+  filter: none;
+  opacity: 1;
+}

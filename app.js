@@ -3408,6 +3408,11 @@ function renderScheduleSheet({ wide = false } = {}) {
   const hourOf = (row) => Math.floor(row.start / 60);
   // PC: 근무 칸 위·아래 끝을 끌어서 시간 늘이기·줄이기
   const grips = !compact && !wide && isDesktop();
+  // PC: 요일 사이 띄우기
+  const gap = compact ? "" : `<td class="sc-gap" aria-hidden="true"></td>`;
+  // 편집 중인 사람 말고는 살짝 흐리게
+  const ed0 = state.slotEdit;
+  const focus = !wide && ed0 && (ed0.empId ?? ed0.addEmpId);
 
   const body = rows
     .map((row, i) => {
@@ -3438,7 +3443,7 @@ function renderScheduleSheet({ wide = false } = {}) {
             })
             .join(""),
         )
-        .join("");
+        .join(gap);
       // 시간 칸: "7:00 ~ 8:00" (휴대폰은 칸이 좁아 "7~8")
       const time = compact ? `${shortTime(fromMin(row.start))}~${shortTime(fromMin(row.end))}` : `${fromMin(row.start)} ~ ${fromMin(row.end)}`;
       return `<tr data-rs="${row.start}" data-re="${row.end}"><td class="sc-time">${time}</td>${cells}</tr>`;
@@ -3447,7 +3452,7 @@ function renderScheduleSheet({ wide = false } = {}) {
 
   const head = days
     .map((d) => `<th colspan="${d.cols.length}" class="${d.wd === 0 || d.wd === 6 ? "sc-rest" : ""}">${WEEKDAYS[d.wd]}</th>`)
-    .join("");
+    .join(compact ? "" : `<th class="sc-gap" aria-hidden="true"></th>`);
   // 휴대폰에서는 표·색 안내 아래에
   const actions = `
         <div class="sc-actions" data-html2canvas-ignore>
@@ -3466,7 +3471,7 @@ function renderScheduleSheet({ wide = false } = {}) {
         ${compact ? "" : actions}
       </div>
       ${compact ? `<div class="sc-help" data-html2canvas-ignore>${schedHelp()}</div>` : ""}
-      <table class="sched modern${compact ? " compact" : ""}">
+      <table class="sched modern${compact ? " compact" : ""}${focus ? " sc-focus" : ""}">
         <thead><tr><th>시간</th>${head}</tr></thead>
         <tbody>
           ${body}
