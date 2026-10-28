@@ -815,7 +815,6 @@ function renderAdminShell(active, content, { center = false, wide = false } = {}
       ${link("#/schedule", "근무표", "schedule")}
       ${link("#/calendar", "달력", "calendar")}
       ${link("#/records", "급여", "records")}
-      ${link("#/me", "정보", "me")}
       <button type="button" class="logout" data-action="logout">로그아웃</button>
     </nav>
     <main class="admin-main${center ? " centered" : ""}${wide ? " wide" : ""}${state.pageEnter ? " page-enter" : ""}">${content}</main>
@@ -921,43 +920,6 @@ const payUrl = () => `${SITE}pay`;
 const workUrl = () => `${SITE}work`;
 
 const resumeUrl = () => `${SITE}resume`; // 매장 이름은 이력서 페이지에 들어 있어요
-function renderMyPage() {
-  const pins = remote?.priv?.slipPins ?? {};
-  const emps = store.employees.filter((e) => e.active);
-  const content = `
-    ${isDesktop() ? "" : mHead("정보")}
-    <div class="me">
-      <section class="me-card">
-        <p class="me-store">${esc(storeName())}</p>
-      </section>
-
-      <section class="me-card">
-        <h2>직원 링크</h2>
-        <p class="me-link-label">근무 상세</p>
-        <div class="me-link"><span>${esc(workUrl())}</span><button type="button" class="pill" data-action="copy-work-link">주소 복사</button></div>
-        <p class="me-link-label">급여명세서</p>
-        <div class="me-link"><span>${esc(payUrl())}</span><button type="button" class="pill" data-action="copy-pay-link">주소 복사</button></div>
-        <ul class="me-pins">
-          ${
-            emps
-              .map(
-                (e) => `<li><span class="name-cell">${esc(e.name)}</span>
-              <b class="me-pin${pins[e.id] ? "" : " wait"}">${pins[e.id] ? esc(pins[e.id]) : "PIN 만드는 중…"}</b>
-              <button type="button" class="pill plain" data-action="slip-new" data-id="${e.id}">새 PIN</button></li>`,
-              )
-              .join("") || `<li class="muted">재직중인 직원이 없어요</li>`
-          }
-        </ul>
-      </section>
-
-      <section class="me-card">
-        <h2>이력서 양식</h2>
-        <div class="me-link"><span>${esc(resumeUrl())}</span><a class="pill plain-dark" href="${esc(resumeUrl())}" target="_blank" rel="noopener">열기</a><button type="button" class="pill" data-action="copy-resume-link">주소 복사</button></div>
-      </section>
-    </div>`;
-  return renderAdminShell("me", content, { center: true });
-}
-
 // ---------- 직원 명세서: PIN 으로 잠가서 공개 ----------
 // PIN(6자리) → PBKDF2 로 키를 만들고, 명세서를 AES-GCM 으로 잠가 public/slips/{직원}/{달} 에 올린다.
 // 키는 사장님만 읽는 private/slipKeys 에 두어서, 다음 달에도 PIN 을 다시 묻지 않고 잠근다.
@@ -1069,7 +1031,6 @@ async function ensureSlipPins() {
     await makeSlipPin(e.id);
     made = true;
   }
-  if (made && route().name === "me") render();
 }
 async function newSlipPin(empId) {
   const emp = employeeById(empId);
@@ -1318,7 +1279,7 @@ function renderMobileShell(active, content) {
     </header>
     <main class="m-main${state.pageEnter ? " page-enter" : ""}">${content}</main>
     <nav class="m-tabbar" aria-label="관리자 메뉴">
-      ${tab("employees", "직원")}${tab("schedule", "근무표")}${tab("calendar", "달력")}${tab("records", "급여")}${tab("me", "정보")}
+      ${tab("employees", "직원")}${tab("schedule", "근무표")}${tab("calendar", "달력")}${tab("records", "급여")}
     </nav>
     ${renderSheet()}
     ${toastHtml()}`;
@@ -1567,6 +1528,7 @@ function renderPaySheet(emp) {
     </ul>
     <p class="sheet-label">날짜별 근무</p>
     <ul class="m-days-list">${days || `<li><span>근무 기록이 없어요</span></li>`}</ul>
+    <button type="button" class="btn-ghost m-share" data-action="share-ts-image" data-id="${emp.id}">카카오톡 전송하기</button>
     <div class="sheet-actions">
       <button type="button" class="btn-ghost" data-action="open-payslip" data-id="${emp.id}">수당 · 명세서</button>
       <button type="button" class="btn-primary" data-action="payslip-pdf-one" data-id="${emp.id}">명세서 PDF</button>
@@ -1951,6 +1913,7 @@ function renderRecords() {
     <div class="section-head">
       <h3>근무 상세</h3>
       <div class="head-actions">
+        ${employeeId ? `<button type="button" class="pill" data-action="share-ts-image" data-id="${employeeId}">카카오톡 전송하기</button>` : ""}
         <button type="button" class="pill plain-dark" data-action="save-xlsx-template" title="매장 엑셀 양식(\"N월 근로현황\" 시트가 있는 파일)을 골라 이 브라우저에 저장해요">엑셀 양식 저장</button>
         <button type="button" class="pill plain-dark" data-action="fill-template-xlsx"${recs.length ? "" : " disabled"} title="저장한 엑셀 양식에 이 달 근무·급여를 채운 새 파일을 받아요">엑셀로 옮기기</button>
       </div>
@@ -2921,6 +2884,41 @@ function renderTsCard(emp, ym) {
     </div>`;
 }
 
+async function shareTimesheetImage(button, empId) {
+  return withBusy(button, "사진 만드는 중…", async () => {
+    const html2canvas = await loadLib("html2canvas");
+    await document.fonts.ready;
+    const emp = employeeById(empId);
+    const { month } = state.payroll;
+    const stage = document.createElement("div");
+    stage.className = "ps-stage";
+    stage.innerHTML = renderTsCard(emp, month);
+    document.body.appendChild(stage);
+    let blob;
+    try {
+      const canvas = await html2canvas(stage.firstElementChild, { scale: 2, backgroundColor: "#ffffff" });
+      blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+    } finally {
+      stage.remove();
+    }
+    if (!blob) throw new Error("사진을 만들지 못했어요. 다시 시도해주세요.");
+    openSharePreview(new File([blob], `${emp.name} ${Number(month.slice(5, 7))}월 근무.png`, { type: "image/png" }), () => {
+      // PC: 복사하면 아직 안 보낸 다음 직원으로 넘긴다 (끝까지 가면 앞에서 안 보낸 사람으로, 다 보내면 전체로)
+      if (state.payroll.employeeId !== empId) return "복사했어요. 카톡 채팅방에 붙여넣기 하세요";
+      if (state.sent?.month !== month) state.sent = { month, ids: new Set() };
+      state.sent.ids.add(empId);
+      const list = store.employees.filter((e) => !isManager(e));
+      const at = list.findIndex((e) => e.id === empId);
+      const next = [...list.slice(at + 1), ...list.slice(0, at)].find((e) => !state.sent.ids.has(e.id));
+      state.payroll.employeeId = next?.id ?? "";
+      if (!next) state.sent = null;
+      state.nextFlashAt = Date.now();
+      render();
+      return next ? `복사했어요. 다음 직원 ${next.name}(으)로 넘어갔어요` : "모두 보냈어요. 전체로 돌아갔어요";
+    });
+  });
+}
+
 // 미리보기 창: 사진을 확인하고 보내기 (공유·복사는 버튼을 누른 순간에 해야 브라우저가 허락한다)
 // onCopied: 복사한 뒤 할 일 (돌려준 글자를 알림으로 띄운다)
 function openSharePreview(file, onCopied) {
@@ -3368,11 +3366,6 @@ async function scheduleShare(button) {
 // ---------- 사용법 튜토리얼 (관리자 화면의 ? 사용법) ----------
 // 단계: { sel: 가리킬 칸, title, text, scene?: 그 단계에서 잠깐 펼쳐 보일 화면 }
 const TOURS = {
-  me: () => [
-    { sel: ".me-card:nth-of-type(2) .me-link", title: "직원 링크", text: "<b>근무 상세</b>와 <b>급여명세서</b> 주소가 따로 있어요. 둘 다 <b>단톡방 공지</b>에 올려 두면, 직원이 같은 PIN으로 자기 것만 봐요." },
-    { sel: ".me-pins", title: "직원별 PIN", text: "직원마다 <b>PIN 6자리가 자동으로</b> 만들어져요. 개인 톡으로 알려 주세요. 근무 상세는 <b>다음 달 1일</b>, 명세서는 <b>다음 달 5일</b>에 자동으로 올라가요. 잃어버렸으면 <b>새 PIN</b>으로 바꿔요." },
-    { sel: ".me-card:nth-of-type(3) .me-link", title: "이력서 양식", text: "지원자에게 이 주소를 문자로 보내면, 휴대폰으로 써서 A4 이력서 사진을 문자로 보내 줘요. 종이 양식은 열어서 ••• → 빈 양식 인쇄." },
-  ],
   employees: (pc) =>
     pc
       ? [
@@ -3425,6 +3418,9 @@ const TOURS = {
       ? [
           { sel: ".month-nav", title: "달 바꾸기", text: "화살표로 지난달 급여를 볼 수 있어요." },
           { sel: "#r-emp", title: "직원 고르기", text: "한 명을 고르면 그 사람 것만 보여요." },
+          { scene: "emp", sel: "[data-action=share-ts-image]", title: "카카오톡 전송하기", text: "직원을 고르면 나타나요. 누르면 이 직원의 한 달 근무를 달력 사진으로 만들어요." },
+          { scene: "share", sel: ".share-box img", title: "근무 사진 미리보기", text: "이런 사진이 만들어져요. 날짜별 근무 시간과 출퇴근 시간, 한 달 합계가 들어가요." },
+          { scene: "share", sel: ".share-actions", title: "복사하기 · 사진 저장", text: "<b>복사하기</b>를 누르고 카톡 채팅방에 붙여넣으면 사진으로 보내져요. 복사하면 <b>다음 직원으로 자동으로 넘어가서</b> 한 명씩 차례로 보낼 수 있어요." },
           { scene: "emp", sel: [".ts-wrap", ".timesheet"], title: "이 직원 근무 상세", text: "날짜별 근무 시간이에요. 근무표보다 더 일하면 파랑, 덜 일하면 빨강으로 보여요." },
           { sel: "#r-tax", title: "세금", text: "보통 3.3%를 떼요. 떼지 않으면 <b>공제 안 함</b>으로 바꿔요." },
           { sel: "[data-action=save-xlsx-template]", title: "엑셀 양식 저장", text: "매장에서 쓰는 급여 엑셀 양식을 한 번 저장해 둬요." },
@@ -3441,6 +3437,9 @@ const TOURS = {
           { sel: ".m-hero", title: "이번 달 합계", text: "실지급액 합계예요. 오른쪽에서 세금(3.3% / 공제 안 함)을 바꿔요." },
           { sel: ".m-pay", title: "직원 누르기", text: "직원을 누르면 그 사람 급여 내역이 열려요." },
           { scene: "paySheet", sel: ".sheet .m-hero", title: "받을 금액", text: "이 직원이 받을 금액과 기본급, 주휴수당, 세금 내역이에요." },
+          { scene: "paySheet", sel: ".sheet .m-share", title: "카카오톡 전송하기", text: "누르면 이 직원의 한 달 근무를 달력 사진으로 만들어요." },
+          { scene: "share", sel: ".share-box img", title: "근무 사진 미리보기", text: "이런 사진이 만들어져요. 날짜별 근무 시간과 한 달 합계가 들어가요." },
+          { scene: "share", sel: ".share-actions", title: "카카오톡 전송하기", text: "<b>카카오톡 전송하기</b>를 누르면 공유 창이 열려서 카톡 채팅방을 고르면 돼요. <b>사진 저장</b>으로 앨범에 저장할 수도 있어요." },
           { scene: "paySheet", sel: ".sheet .sheet-actions", title: "수당 · 명세서 / 명세서 PDF", text: "<b>수당 · 명세서</b>에서 수당을 넣고, <b>명세서 PDF</b>로 명세서를 받아요." },
           { scene: "payslip", sel: ".ps-allow", title: "수당 입력", text: "특근수당 같은 수당을 이름과 금액으로 넣고 <b>저장</b>해요." },
           { sel: ".m-fold > summary", title: "날짜별 근무 시간", text: "전체 직원의 날짜별 근무 시간 표예요." },
@@ -3483,6 +3482,16 @@ const TOUR_SCENES = {
   add: { hash: () => (isDesktop() ? null : `#/day/${todayDateString()}`), set: () => Object.assign(state, isDesktop() ? { selectedDate: todayDateString(), animateOpen: false, adding: true } : { adding: true }) },
   emp: { set: () => (state.payroll.employeeId = firstPayEmp() ?? "") },
   payslip: { set: tourPayslip },
+  share: {
+    set: async () => {
+      const id = firstPayEmp();
+      if (!id) return;
+      if (isDesktop()) state.payroll.employeeId = id;
+      else state.sheet = { type: "pay", id };
+      render();
+      await shareTimesheetImage(document.createElement("button"), id);
+    },
+  },
   schedShare: { set: async () => scheduleShare(document.createElement("button")) },
   paySheet: { set: () => (state.sheet = { type: "pay", id: firstPayEmp() }) },
   slot: { set: () => tourSlot(false) },
@@ -3659,7 +3668,7 @@ function route() {
   if (day) return { name: "day", date: day[1] };
   // /pay/ 주소(카톡 미리보기 제목 "급여 MGC 근무")는 처음부터 내 근무 · 급여명세서 화면
   if (!ADMIN_SITE) return { name: pageTab() || ["/my", "/pay", "/work"].includes(hash) ? "pay" : "home" };
-  const page = { "/records": "records", "/schedule": "schedule", "/calendar": "calendar", "/me": "me" }[hash];
+  const page = { "/records": "records", "/schedule": "schedule", "/calendar": "calendar" }[hash];
   return { name: page ?? "employees" };
 }
 
@@ -3679,7 +3688,6 @@ function render() {
   else if (r.name === "employees") app.innerHTML = renderEmployees();
   else if (r.name === "records") app.innerHTML = renderRecords();
   else if (r.name === "schedule") app.innerHTML = renderSchedule();
-  else if (r.name === "me") app.innerHTML = renderMyPage();
   else if (r.name === "pay") app.innerHTML = renderPayPage();
   else app.innerHTML = renderHome();
 
@@ -3697,7 +3705,7 @@ function render() {
   // (저장 직후 다시 그려져도 이어서 돌도록 지난 시간만큼 앞당겨 시작)
   const flashMs = Date.now() - (state.nextFlashAt ?? 0);
   if (flashMs < 2600 && r.name === "records") {
-    for (const sel of ["#r-emp", ".ts-desktop"]) {
+    for (const sel of ["#r-emp", ".ts-desktop", '[data-action="share-ts-image"]']) {
       const el = app.querySelector(sel);
       if (!el) continue;
       el.style.setProperty("--flash-t", `${flashMs}ms`);
@@ -4022,6 +4030,9 @@ app.addEventListener("click", (e) => {
       return;
     case "save-xlsx-template":
       saveXlsxTemplate(el);
+      return;
+    case "share-ts-image":
+      shareTimesheetImage(el, el.dataset.id);
       return;
     case "payroll-prev":
     case "payroll-next":
