@@ -5774,11 +5774,12 @@ body.sc-drag-resize * {
 }
 /* 이름을 눌러 고치는 중: 그 근무만 또렷하게, 나머지는 살짝 흐리게 */
 .sched.modern td.sc-name {
-  transition: filter 0.18s, opacity 0.18s;
+  transition: filter 0.28s ease, opacity 0.28s ease;
 }
+/* 흐림 대신 색을 빼고 옅게 (칸 모양은 또렷하게 두어 떠 보이지 않게) */
 .sched.modern.sc-focus td.sc-name:not(.sc-editing) {
-  filter: blur(1.2px);
-  opacity: 0.55;
+  filter: saturate(0.35);
+  opacity: 0.38;
 }
 .sched-sheet.capturing .sched.modern.sc-focus td.sc-name {
   filter: none;
