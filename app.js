@@ -3684,7 +3684,7 @@ function renderScheduleShareCard() {
   const all = days.flatMap((d) => d.cols.flat());
   const first = Math.floor(Math.min(...all.map((p) => p.start), 7 * 60) / 60) * 60;
   const last = Math.ceil(Math.max(...all.map((p) => p.end), 22 * 60) / 60) * 60;
-  const H = 46; // 1시간 높이(px)
+  const H = 52; // 1시간 높이(px)
   const hours = [];
   for (let t = first; t <= last; t += 60) hours.push(t);
   const lanesOf = (d) => d.cols.filter((c) => c.length);
