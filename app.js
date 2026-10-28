@@ -3684,7 +3684,7 @@ function renderScheduleShareCard() {
   const all = days.flatMap((d) => d.cols.flat());
   const first = Math.floor(Math.min(...all.map((p) => p.start), 7 * 60) / 60) * 60;
   const last = Math.ceil(Math.max(...all.map((p) => p.end), 22 * 60) / 60) * 60;
-  const H = 60; // 1시간 높이(px)
+  const H = 46; // 1시간 높이(px)
   const hours = [];
   for (let t = first; t <= last; t += 60) hours.push(t);
   const lanesOf = (d) => d.cols.filter((c) => c.length);
@@ -3710,7 +3710,7 @@ function renderScheduleShareCard() {
             const te = shortTime(fromMin(p.end).padStart(5, "0"));
             // 한 요일에 3명 이상 나란히 서면 칸이 좁아서, 22:30 처럼 분이 있을 때만 두 줄로
             const time = lanes.length > 2 && (ts.includes(":") || te.includes(":")) ? `${ts}–<br />${te}` : `${ts}–${te}`;
-            return `<div class="scs-block${h < 80 ? " short" : ""}" style="top:${((p.start - first) / 60) * H + 2}px;height:${h - 4}px;left:calc(${w * li}% + 1px);width:calc(${w}% - 2px);background:${strong};color:${ink}"><b>${esc(schedName(p.emp))}</b><small>${time}</small></div>`;
+            return `<div class="scs-block${h < 70 ? " short" : ""}" style="top:${((p.start - first) / 60) * H + 2}px;height:${h - 4}px;left:calc(${w * li}% + 1px);width:calc(${w}% - 2px);background:${strong};color:${ink}"><b>${esc(schedName(p.emp))}</b><small>${time}</small></div>`;
           }),
         )
         .join("");

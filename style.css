@@ -5805,8 +5805,8 @@ body.sc-drag-resize * {
   top: 0;
 }
 .scs {
-  width: 1400px;
-  padding: 44px 32px 30px;
+  width: 1640px;
+  padding: 30px 32px 22px;
   background: #ffffff;
   color: #191f28;
   font-family: "Pretendard Variable", "Pretendard", -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
@@ -5816,11 +5816,15 @@ body.sc-drag-resize * {
   letter-spacing: 0 !important;
 }
 .scs-top {
-  margin: 0 0 24px 2px;
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin: 0 0 18px 2px;
 }
 .scs-store {
-  margin: 0 0 4px;
-  font-size: 19px;
+  order: 2;
+  margin: 0;
+  font-size: 22px;
   font-weight: 600;
   color: #8b95a1;
 }
@@ -5833,33 +5837,33 @@ body.sc-drag-resize * {
   font-weight: 800;
 }
 .scs-title span {
-  font-size: 27px;
+  font-size: 30px;
   font-weight: 700;
   color: #4e5968;
 }
 .scs-head {
   display: flex;
   gap: 6px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 .scs-axis-w {
-  flex: 0 0 46px;
+  flex: 0 0 56px;
 }
 .scs-day {
   display: flex;
   align-items: baseline;
   justify-content: center;
   gap: 5px;
-  padding: 8px 0;
+  padding: 7px 0;
   border-radius: 10px;
   background: #f2f4f6;
 }
 .scs-day b {
-  font-size: 22px;
+  font-size: 26px;
   font-weight: 800;
 }
 .scs-day small {
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 600;
   color: #8b95a1;
 }
@@ -5876,15 +5880,15 @@ body.sc-drag-resize * {
 }
 .scs-axis {
   position: relative;
-  flex: 0 0 46px;
+  flex: 0 0 56px;
 }
 .scs-axis span {
   position: absolute;
   right: 4px;
-  margin-top: -9px;
-  font-size: 15px;
+  margin-top: -10px;
+  font-size: 17px;
   font-weight: 600;
-  line-height: 18px;
+  line-height: 20px;
   color: #8b95a1;
 }
 .scs-grid {
@@ -5913,12 +5917,12 @@ body.sc-drag-resize * {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 10px 4px 10px 10px;
+  padding: 8px 4px 8px 10px;
   border-radius: 10px;
   overflow: hidden;
 }
 .scs-block b {
-  font-size: 19px;
+  font-size: 23px;
   font-weight: 800;
   /* 백 인 환 처럼 글자 사이를 띄운다 */
   letter-spacing: 0.16em !important;
@@ -5926,7 +5930,7 @@ body.sc-drag-resize * {
   white-space: nowrap;
 }
 .scs-block small {
-  font-size: 15px;
+  font-size: 18px;
   font-weight: 600;
   opacity: 0.85;
   white-space: nowrap;
@@ -5937,9 +5941,9 @@ body.sc-drag-resize * {
   padding-bottom: 0;
 }
 .scs-foot {
-  margin: 18px 2px 0;
+  margin: 12px 2px 0;
   text-align: right;
-  font-size: 14px;
+  font-size: 15px;
   color: #b0b8c1;
 }
 .scs-block small {
