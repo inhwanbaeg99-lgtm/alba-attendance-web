@@ -3677,34 +3677,91 @@ function finishSlot() {
   render();
 }
 
+// ---------- 카톡 사진용 근무표 (캘린더 앱처럼: 한 사람의 근무 = 한 덩어리) ----------
+// 직원 색 → 연한 바탕 · 진한 띠 (html2canvas 가 color-mix 를 못 읽어서 직접 계산)
+function shareTint(color) {
+  const ctx = (shareTint.ctx ??= document.createElement("canvas").getContext("2d"));
+  ctx.fillStyle = "#ffffff";
+  ctx.fillStyle = cssColor(color);
+  const hex = ctx.fillStyle.startsWith("#") ? ctx.fillStyle : "#ffffff";
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  const mix = (k, base) => [r, g, b].map((c) => Math.round(c * k + base * (1 - k)));
+  // 흰색(매니저)·아주 연한 색은 회색 띠로
+  const strong = lum > 0.93 ? [139, 149, 161] : lum > 0.7 ? mix(0.72, 0) : [r, g, b];
+  const soft = lum > 0.93 ? [243, 244, 246] : mix(0.3, 255);
+  const rgb = (a) => `rgb(${a.join(",")})`;
+  return { soft: rgb(soft), strong: rgb(strong) };
+}
+
+function renderScheduleShareCard() {
+  const { days } = scheduleLayout();
+  const meta = schedMeta();
+  const all = days.flatMap((d) => d.cols.flat());
+  const first = Math.floor(Math.min(...all.map((p) => p.start), 7 * 60) / 60) * 60;
+  const last = Math.ceil(Math.max(...all.map((p) => p.end), 22 * 60) / 60) * 60;
+  const H = 46; // 1시간 높이(px)
+  const hours = [];
+  for (let t = first; t <= last; t += 60) hours.push(t);
+  const lanesOf = (d) => d.cols.filter((c) => c.length);
+  const head = days
+    .map((d) => {
+      const n = lanesOf(d).flat().length;
+      return `<div class="scs-day${d.wd === 0 ? " sun" : d.wd === 6 ? " sat" : ""}" style="flex:${Math.max(1, lanesOf(d).length)}"><b>${WEEKDAYS[d.wd]}</b><small>${n}명</small></div>`;
+    })
+    .join("");
+  const cols = days
+    .map((d) => {
+      const lanes = lanesOf(d);
+      const w = 100 / Math.max(1, lanes.length);
+      const blocks = lanes
+        .flatMap((lane, li) =>
+          lane.map((p) => {
+            const { soft, strong } = shareTint(p.emp.color);
+            const h = ((p.end - p.start) / 60) * H;
+            const ts = shortTime(fromMin(p.start).padStart(5, "0"));
+            const te = shortTime(fromMin(p.end).padStart(5, "0"));
+            // 22:30 처럼 분이 있으면 칸이 좁아서 두 줄로
+            const time = ts.includes(":") || te.includes(":") ? `${ts}–<br />${te}` : `${ts}–${te}`;
+            return `<div class="scs-block${h < 70 ? " short" : ""}" style="top:${((p.start - first) / 60) * H + 2}px;height:${h - 4}px;left:calc(${w * li}% + 1px);width:calc(${w}% - 2px);background:${soft};border-left-color:${strong}"><b>${esc(schedName(p.emp))}</b><small>${time}</small></div>`;
+          }),
+        )
+        .join("");
+      return `<div class="scs-col" style="flex:${Math.max(1, lanes.length)}">${blocks}</div>`;
+    })
+    .join("");
+  const lines = hours.map((t, i) => `<div class="scs-line" style="top:${i * H}px"></div>`).join("");
+  const axis = hours.map((t, i) => `<span style="top:${i * H}px">${t / 60}시</span>`).join("");
+  return `
+    <div class="scs">
+      <div class="scs-top">
+        <p class="scs-store">${esc(storeName())}</p>
+        <h1 class="scs-title">근무표${meta.period ? `<span>${esc(normalizePeriod(meta.period.trim()))}</span>` : ""}</h1>
+      </div>
+      <div class="scs-head"><div class="scs-axis-w"></div>${head}</div>
+      <div class="scs-body" style="height:${(hours.length - 1) * H}px">
+        <div class="scs-axis">${axis}</div>
+        <div class="scs-grid">${lines}<div class="scs-cols">${cols}</div></div>
+      </div>
+      <p class="scs-foot">${todayDateString().replaceAll("-", ".")} 출력</p>
+    </div>`;
+}
+
 // 근무표를 사진으로 찍어 카톡으로 보낸다 (휴대폰은 공유창, PC는 복사해서 붙여넣기)
 async function scheduleShare(button) {
   return withBusy(button, "사진 만드는 중…", async () => {
     const html2canvas = await loadLib("html2canvas");
     await document.fonts.ready;
-    // 사진은 화면 밖에 폭을 줄인 표를 따로 그려서 찍는다 (휴대폰 화면의 표는 이름 없이 색만, PC 화면의 표는 너무 넓어서)
+    // 사진은 화면 밖에 사진용 근무표를 따로 그려서 찍는다
     const stage = document.createElement("div");
-    stage.className = "sc-wide-stage";
-    stage.innerHTML = renderScheduleSheet({ wide: true }).replace('id="sched-sheet"', "");
+    stage.className = "scs-stage";
+    stage.innerHTML = renderScheduleShareCard();
     document.body.appendChild(stage);
-    const sheet = stage.firstElementChild;
-    const fold = sheet.closest("details");
-    const wasOpen = fold?.open;
-    if (fold) fold.open = true;
-    sheet.classList.add("capturing");
-    // 기간 입력칸은 글자로 바꿔서 찍는다 (입력칸 여백이 생기지 않게)
-    const period = sheet.querySelector(".sc-period");
-    const periodText = document.createElement("span");
-    periodText.textContent = period.value;
-    period.replaceWith(periodText);
     let blob;
     try {
-      const canvas = await html2canvas(sheet, { scale: 2, backgroundColor: "#ffffff" });
+      const canvas = await html2canvas(stage.firstElementChild, { scale: 2, backgroundColor: "#ffffff" });
       blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
     } finally {
-      periodText.replaceWith(period);
-      sheet.classList.remove("capturing");
-      if (fold) fold.open = wasOpen;
       stage.remove();
     }
     if (!blob) throw new Error("사진을 만들지 못했어요. 다시 시도해주세요.");
