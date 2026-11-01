@@ -5989,207 +5989,74 @@ body.sc-drag-resize * {
 }
 
 /* =====================================================================
-   발주 (MGC 체크리스트의 추가 발주 · 재고 현황, app.js renderOrder)
+   발주 (app.js renderOrder): 근무앱 공통 모양(toolbar · pill · table-wrap · status) 위에 조금만 더함
    ===================================================================== */
 .po-wrap {
-  max-width: 640px;
-  margin: 0 auto;
   transition: opacity 0.2s ease;
 }
 .po-wrap.is-loading {
   opacity: 0.5;
 }
-.po-top {
+.po-views {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 20px;
+  gap: 6px;
 }
-.po-seg {
-  display: inline-flex;
-  gap: 2px;
-  padding: 3px;
-  border-radius: 12px;
-  background: var(--paper);
-}
-.po-seg button {
-  border: 0;
-  border-radius: 9px;
-  padding: 8px 16px;
-  background: transparent;
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--ink-sub);
+.po-views .pill,
+.head-actions .pill {
   cursor: pointer;
 }
-.po-seg button[aria-selected="true"] {
-  background: var(--bg);
-  color: var(--ink);
-  font-weight: 700;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+.po-table td {
+  white-space: normal;
 }
-.po-date {
-  border: 0;
-  border-radius: 12px;
-  padding: 10px 14px;
-  background: var(--paper);
-  font-size: 15px;
-  font-weight: 600;
-  cursor: pointer;
+.po-table tr.po-group td {
+  border-top-color: color-mix(in srgb, var(--ink-sub) 35%, transparent);
 }
-.po-hero {
-  margin: 4px 0 16px;
+.po-page-head {
+  margin: 24px 0 8px;
 }
-.po-hero p {
+.po-page-head h4 {
   margin: 0;
   font-size: 15px;
-  font-weight: 600;
-  color: var(--ink-sub);
 }
-.po-hero b {
-  font-size: 32px;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-}
-.po-hero small {
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--ink-sub);
-}
-.po-card {
-  margin-bottom: 12px;
-  padding: 16px 18px;
-  border-radius: 20px;
-  background: var(--paper);
-}
-.po-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--accent);
-}
-.po-head em {
-  font-style: normal;
-  font-size: 13px;
-  color: var(--ink-sub);
-}
-.po-card ul {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.po-card li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 11px 0;
-  font-size: 16px;
-  font-weight: 600;
-}
-.po-card li + li {
-  border-top: 1px solid var(--line);
-}
-.po-card li b.po-under {
-  color: var(--red);
-}
-.po-card li b.po-flag {
-  padding: 3px 10px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--red) 12%, transparent);
-  color: var(--red);
+.po-summary {
+  margin: -4px 0 0;
   font-size: 14px;
 }
-.po-val {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  white-space: nowrap;
-}
-.po-badge {
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-style: normal;
-  font-size: 12px;
-  font-weight: 700;
-}
-.po-badge.po-under {
-  background: color-mix(in srgb, var(--red) 12%, transparent);
+.po-red {
   color: var(--red);
 }
-.po-badge.po-equal {
-  background: color-mix(in srgb, var(--ink-sub) 14%, transparent);
-  color: var(--ink-sub);
-}
-.po-badge.po-over {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+.po-blue {
   color: var(--accent);
 }
-.po-bar {
-  display: flex;
-  gap: 3px;
-  height: 8px;
-  margin-bottom: 10px;
-  border-radius: 999px;
-  overflow: hidden;
+.status.po-short {
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+  color: var(--red);
+  font-weight: 700;
 }
-.po-bar span.po-under,
-.po-legend i.po-under {
-  background: var(--red);
+.status.po-none {
+  background: transparent;
 }
-.po-bar span.po-equal,
-.po-legend i.po-equal {
-  background: var(--ink-sub);
+.po-num {
+  width: 64px;
+  text-align: right;
 }
-.po-bar span.po-over,
-.po-legend i.po-over {
-  background: var(--accent);
+.po-move {
+  white-space: nowrap !important;
 }
-.po-legend {
-  display: flex;
-  gap: 14px;
-  margin-bottom: 14px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--ink-sub);
+.po-move .round-btn {
+  width: 30px;
+  height: 30px;
+  margin-right: 4px;
 }
-.po-legend i {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  margin-right: 5px;
-  border-radius: 50%;
+.po-move .round-btn:disabled {
+  opacity: 0.25;
 }
-.po-filter {
-  margin-bottom: 14px;
-}
-.po-empty {
-  padding: 48px 0;
-  text-align: center;
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--ink-sub);
+.po-edit-note {
+  margin: -12px 0 0;
 }
 .po-retry {
-  display: block;
-  margin: -24px auto 24px;
-  border: 0;
-  border-radius: 12px;
-  padding: 10px 18px;
-  background: var(--accent);
-  color: #ffffff;
-  font-weight: 700;
-  cursor: pointer;
-}
-.po-note {
-  margin: 20px 0 0;
-  font-size: 13px;
-  color: var(--ink-sub);
+  margin: 16px 0 0;
   text-align: center;
 }
 .po-loading {
