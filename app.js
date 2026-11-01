@@ -815,6 +815,7 @@ function renderAdminShell(active, content, { center = false, wide = false } = {}
       ${link("#/schedule", "근무표", "schedule")}
       ${link("#/calendar", "달력", "calendar")}
       ${link("#/records", "급여", "records")}
+      ${link("#/order", "발주", "order")}
       <button type="button" class="logout" data-action="logout">로그아웃</button>
     </nav>
     <main class="admin-main${center ? " centered" : ""}${wide ? " wide" : ""}${state.pageEnter ? " page-enter" : ""}">${content}</main>
@@ -1282,7 +1283,7 @@ function renderMobileShell(active, content) {
     </header>
     <main class="m-main${state.pageEnter ? " page-enter" : ""}">${content}</main>
     <nav class="m-tabbar" aria-label="관리자 메뉴">
-      ${tab("employees", "직원")}${tab("schedule", "근무표")}${tab("calendar", "달력")}${tab("records", "급여")}
+      ${tab("employees", "직원")}${tab("schedule", "근무표")}${tab("calendar", "달력")}${tab("records", "급여")}${tab("order", "발주")}
     </nav>
     ${renderSheet()}
     ${toastHtml()}`;
@@ -1999,6 +2000,218 @@ function renderPayslipModal() {
         <div class="ps-preview">${renderPayslip(r, month)}</div>
       </div>
     </div>`;
+}
+
+// =====================================================================
+// 발주: MGC 체크리스트 관리자 화면의 '추가 발주 · 재고 현황'을 그대로 불러와 보기만 한다
+// - 입력값은 체크리스트와 같은 구글 시트(Apps Script)에서, 품목 목록 · 발주 이름은 체크리스트 페이지에서 읽어
+//   체크리스트에서 품목을 고치면 여기도 같이 바뀐다 (수정은 체크리스트에서)
+// =====================================================================
+const CHECKLIST_PAGE = "https://inhwanbaeg99-lgtm.github.io/megacoffee-checklist/";
+const CHECKLIST_API =
+  "https://script.google.com/macros/s/AKfycbzEffsg53ZmMEf_wTlUZ2eGZW4XVDHLPxna8uY8zlsGdlm64M2zbscE4ppKBNAWgJoI/exec";
+const PO_CATEGORIES = ["시럽/소스", "유제품", "기타식품", "파우더류", "비식품", "신선식품", "베이커리", "RTD", "냉동과일", "커피/티", "검색 or 사입"];
+const po = { catalog: null, names: {}, dates: [], date: "", values: null, tab: "reorder", filter: "all", loading: false, error: "" };
+
+async function poGet(query) {
+  const res = await fetch(`${CHECKLIST_API}?${query}`);
+  if (!res.ok) throw new Error("load");
+  return res.json();
+}
+// 체크리스트 페이지 안의 품목 목록(DATA) · 발주 이름(ORDER_NAMES)을 꺼냄
+function poLiteral(src, name, close) {
+  const m = src.match(new RegExp(`const ${name} = ([\\[{][\\s\\S]*?\\n  \\${close});`));
+  return m ? Function(`"use strict"; return (${m[1]});`)() : null;
+}
+// 체크리스트 관리자에서 바꾼 것(추가한 품목 · 지운 품목 · 순서 · 기준 수량)을 품목 목록에 반영
+function poApplySettings(data, settings) {
+  const json = (v) => {
+    try {
+      return typeof v === "string" ? JSON.parse(v) : v;
+    } catch {
+      return null;
+    }
+  };
+  const all = () => data.flat();
+  for (const item of json(settings.__custom_items__) ?? []) {
+    if (!item || !Number.isInteger(item.page) || item.page < 1 || item.page > data.length || typeof item.label !== "string") continue;
+    if (all().some((x) => x.label === item.label)) continue;
+    if (item.segments === 3) data[item.page - 1].push({ label: item.label, segments: 3 });
+    else if (/^\d{1,6}(개|박스|통|봉)$/.test(item.qty))
+      data[item.page - 1].push({ label: item.label, qty: item.qty, ...(Number.isInteger(item.orderThreshold) ? { orderThreshold: item.orderThreshold } : {}) });
+  }
+  const deleted = json(settings.__deleted_items__) ?? [];
+  data.forEach((items, i) => (data[i] = items.filter((x) => !deleted.includes(x.label))));
+  const order = json(settings.__item_order__);
+  if (Array.isArray(order))
+    data.forEach((items, i) => {
+      if (!Array.isArray(order[i])) return;
+      const rank = (x) => (order[i].includes(x.label) ? order[i].indexOf(x.label) : Infinity);
+      items.sort((a, b) => rank(a) - rank(b));
+    });
+  for (const item of all()) {
+    const c = json(settings[item.label]);
+    if (!c || item.segments) continue;
+    if (Number.isInteger(c.qty) && c.qty >= 0) item.qty = `${c.qty}${item.qty.replace(/[0-9]+/, "")}`;
+    if (item.orderThreshold !== undefined && Number.isInteger(c.threshold) && c.threshold >= 0) item.orderThreshold = c.threshold;
+  }
+  return data;
+}
+async function poLoad(date) {
+  po.loading = true;
+  po.error = "";
+  render();
+  try {
+    if (!po.catalog) {
+      const [page, settings, list] = await Promise.all([
+        fetch(CHECKLIST_PAGE, { cache: "no-cache" }).then((r) => r.text()),
+        poGet("date=settings"),
+        poGet("dates=1"),
+      ]);
+      const data = poLiteral(page, "DATA", "]");
+      if (!Array.isArray(data)) throw new Error("catalog");
+      po.names = poLiteral(page, "ORDER_NAMES", "}") ?? {};
+      po.catalog = poApplySettings(data, settings.values ?? {});
+      const today = todayDateString();
+      po.dates = [...new Set([today, ...(list.dates ?? []).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))])].sort().reverse();
+    }
+    const first = !date && !po.date;
+    po.date = date || po.date || todayDateString();
+    po.values = (await poGet(`date=${encodeURIComponent(po.date)}`)).values ?? {};
+    // 처음 열 때 오늘 입력이 아직 없으면 가장 최근에 입력한 날로
+    const filled = () => po.catalog.flat().some((item) => po.values[item.label] !== undefined && String(po.values[item.label]).trim() !== "");
+    const prev = po.dates.find((d) => d < po.date);
+    if (first && !filled() && prev) {
+      po.date = prev;
+      po.values = (await poGet(`date=${encodeURIComponent(po.date)}`)).values ?? {};
+    }
+  } catch {
+    po.error = "체크리스트 내용을 불러오지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.";
+  }
+  po.loading = false;
+  if (route().name === "order") render();
+}
+
+const poKey = (label) => String(label).replace(/[\s·]/g, "");
+function poOrderInfo(label) {
+  const keys = Object.keys(po.names);
+  const k = keys.find((x) => poKey(x) === poKey(label));
+  return k ? [...po.names[k], keys.indexOf(k)] : [label, "검색 or 사입", Infinity];
+}
+const poNum = (qty) => {
+  const m = String(qty).match(/^(\d+)(.*)$/);
+  return m ? { num: Number(m[1]), unit: m[2].trim() } : { num: null, unit: "" };
+};
+// 입력값 상태: 부족 · 딱 맞음 · 넉넉 · 입력 안 함 (체크리스트와 같은 기준)
+function poState(item) {
+  const raw = po.values?.[item.label];
+  if (raw === undefined || raw === null || raw === "") return { text: "-", tone: "empty" };
+  const target = item.segments ? item.segments : poNum(item.qty).num;
+  const text = item.segments ? `${raw} / ${item.segments}` : `${raw} / ${item.qty}`;
+  const n = Number(raw);
+  if (target === null || Number.isNaN(n)) return { text, tone: "equal" };
+  const under = item.orderThreshold !== undefined ? n <= item.orderThreshold : n < target;
+  return { text, raw: n, tone: under ? "under" : n > target ? "over" : "equal" };
+}
+const PO_BADGE = { under: "부족", equal: "딱 맞음", over: "넉넉" };
+const poDateLabel = (d) => {
+  const day = "일월화수목금토"[new Date(`${d}T00:00:00`).getDay()];
+  const tag = d === todayDateString() ? "오늘 · " : "";
+  return `${tag}${Number(d.slice(5, 7))}월 ${Number(d.slice(8))}일 (${day})`;
+};
+
+function renderOrderReorder() {
+  const groups = new Map(PO_CATEGORIES.map((c) => [c, []]));
+  for (const item of po.catalog.flat()) {
+    const st = poState(item);
+    if (st.tone !== "under") continue;
+    let text = "발주";
+    if (!item.segments && item.orderThreshold === undefined) {
+      const { num, unit } = poNum(item.qty);
+      text = num !== null ? `${num - st.raw}${unit}` : "발주 필요";
+    }
+    const [name, cat, rank] = poOrderInfo(item.label);
+    (groups.get(cat) ?? groups.get("검색 or 사입")).push({ name, text, rank });
+  }
+  const used = [...groups].filter(([, rows]) => rows.length);
+  if (!used.length) return `<p class="po-empty">발주가 필요한 항목이 없어요</p>`;
+  const total = used.reduce((n, [, rows]) => n + rows.length, 0);
+  return `
+    <div class="po-hero"><p>오늘 발주할 품목</p><b>${total}개</b></div>
+    ${used
+      .map(
+        ([cat, rows]) => `
+      <section class="po-card">
+        <div class="po-head"><span>${esc(cat)}</span><em>${rows.length}</em></div>
+        <ul>${rows
+          .sort((a, b) => a.rank - b.rank)
+          .map(({ name, text }) => `<li><span>${esc(name)}</span><b class="${text === "발주" ? "po-flag" : "po-under"}">${esc(text)}</b></li>`)
+          .join("")}</ul>
+      </section>`,
+      )
+      .join("")}`;
+}
+
+function renderOrderStock() {
+  const all = po.catalog.flat();
+  const counts = { under: 0, equal: 0, over: 0 };
+  all.forEach((item) => counts[poState(item).tone] !== undefined && counts[poState(item).tone]++);
+  const show = (tone) => po.filter === "all" || (po.filter === "under" ? tone === "under" : tone !== "under");
+  const cards = po.catalog
+    .map((items, i) => {
+      const rows = items.map((item) => [item, poState(item)]).filter(([, st]) => show(st.tone));
+      if (!rows.length) return "";
+      return `
+      <section class="po-card">
+        <div class="po-head"><span>${i + 1}페이지</span><em>${rows.length}</em></div>
+        <ul>${rows
+          .map(
+            ([item, st]) =>
+              `<li><span>${esc(item.label)}</span><span class="po-val"><b>${esc(st.text)}</b>${PO_BADGE[st.tone] ? `<i class="po-badge po-${st.tone}">${PO_BADGE[st.tone]}</i>` : ""}</span></li>`,
+          )
+          .join("")}</ul>
+      </section>`;
+    })
+    .join("");
+  return `
+    <div class="po-hero"><p>부족한 품목</p><b>${counts.under}<small> / ${all.length}개</small></b></div>
+    <div class="po-bar" aria-hidden="true">${["under", "equal", "over"].map((k) => `<span class="po-${k}" style="flex:${counts[k]}"></span>`).join("")}</div>
+    <div class="po-legend"><span><i class="po-under"></i>부족 ${counts.under}</span><span><i class="po-equal"></i>딱 맞음 ${counts.equal}</span><span><i class="po-over"></i>넉넉 ${counts.over}</span></div>
+    <div class="po-seg po-filter" role="tablist">${[
+      ["all", "전체"],
+      ["under", "부족"],
+      ["ok", "충분"],
+    ]
+      .map(([k, t]) => `<button type="button" role="tab" aria-selected="${po.filter === k}" data-action="po-filter" data-filter="${k}">${t}</button>`)
+      .join("")}</div>
+    ${cards || `<p class="po-empty">해당하는 품목이 없어요</p>`}`;
+}
+
+function renderOrder() {
+  if (!po.catalog && !po.loading && !po.error) setTimeout(() => poLoad(), 0);
+  let body;
+  if (po.error) body = `<p class="po-empty">${esc(po.error)}</p><button type="button" class="po-retry" data-action="po-reload">다시 불러오기</button>`;
+  else if (!po.catalog || !po.values) body = `<div class="po-loading" aria-label="불러오는 중"><span></span></div>`;
+  else if (!po.catalog.flat().some((item) => po.values[item.label] !== undefined && String(po.values[item.label]).trim() !== ""))
+    body = `<p class="po-empty">이 날은 체크리스트 입력이 없어요</p>`;
+  else body = po.tab === "reorder" ? renderOrderReorder() : renderOrderStock();
+  const dates = po.dates.length ? po.dates : [po.date || todayDateString()];
+  const content = `
+    ${isDesktop() ? "" : mHead("발주")}
+    <div class="po-wrap${po.loading && po.values ? " is-loading" : ""}">
+      <div class="po-top">
+        <div class="po-seg" role="tablist">
+          <button type="button" role="tab" aria-selected="${po.tab === "reorder"}" data-action="po-tab" data-tab="reorder">추가 발주</button>
+          <button type="button" role="tab" aria-selected="${po.tab === "stock"}" data-action="po-tab" data-tab="stock">재고 현황</button>
+        </div>
+        <select id="po-date" class="po-date" aria-label="날짜 선택">${dates
+          .map((d) => `<option value="${d}"${d === (po.date || dates[0]) ? " selected" : ""}>${poDateLabel(d)}</option>`)
+          .join("")}</select>
+      </div>
+      ${body}
+      <p class="po-note">MGC 체크리스트에 입력된 내용이에요. 품목 · 기준 수량은 체크리스트 관리자에서 바꿔요.</p>
+    </div>`;
+  return renderAdminShell("order", content);
 }
 
 function renderRecords() {
@@ -3844,6 +4057,10 @@ const TOURS = {
     { scene: "staff", sel: ".staff-item.expanded", title: "출근 처리 · 수정", text: "이름을 누르면 <b>수정</b>(그날만 시간 바꾸기), <b>출근 처리</b>(출근을 못 찍은 경우), <b>기록 삭제</b> 버튼이 나와요." },
     { scene: "add", sel: "#add-extra", title: "대타 · 추가 근무", text: "<b>+</b>를 누르면 이름과 시간을 넣어 그날만 근무자를 추가해요." },
   ],
+  order: () => [
+    { sel: ".po-top .po-seg", title: "추가 발주 · 재고 현황", text: "<b>추가 발주</b>는 오늘 시켜야 할 품목과 수량, <b>재고 현황</b>은 체크리스트에 입력된 전체 재고예요." },
+    { sel: "#po-date", title: "날짜 고르기", text: "체크리스트를 입력한 다른 날도 볼 수 있어요." },
+  ],
   records: (pc) =>
     pc
       ? [
@@ -4116,7 +4333,7 @@ function route() {
   if (day) return { name: "day", date: day[1] };
   // /pay/ 주소(카톡 미리보기 제목 "급여 MGC 근무")는 처음부터 내 근무 · 급여명세서 화면
   if (!ADMIN_SITE) return { name: pageTab() || ["/my", "/pay", "/work"].includes(hash) ? "pay" : "home" };
-  const page = { "/records": "records", "/schedule": "schedule", "/calendar": "calendar" }[hash];
+  const page = { "/records": "records", "/schedule": "schedule", "/calendar": "calendar", "/order": "order" }[hash];
   return { name: page ?? "employees" };
 }
 
@@ -4339,6 +4556,7 @@ function render() {
   else if (r.name === "calendar") app.innerHTML = renderAdminCalendar();
   else if (r.name === "employees") app.innerHTML = renderEmployees();
   else if (r.name === "records") app.innerHTML = renderRecords();
+  else if (r.name === "order") app.innerHTML = renderOrder();
   else if (r.name === "schedule") app.innerHTML = renderSchedule();
   else if (r.name === "pay") app.innerHTML = renderPayPage();
   else app.innerHTML = renderHome();
@@ -4515,6 +4733,19 @@ app.addEventListener("click", (e) => {
   const { action, id } = el.dataset;
 
   switch (action) {
+    case "po-tab":
+      po.tab = el.dataset.tab;
+      render();
+      return;
+    case "po-filter":
+      po.filter = el.dataset.filter;
+      render();
+      return;
+    case "po-reload":
+      po.catalog = null;
+      po.error = "";
+      poLoad();
+      return;
     case "prev-month":
     case "next-month": {
       const m = state.month + (action === "prev-month" ? -1 : 1);
@@ -4999,6 +5230,10 @@ app.addEventListener("submit", (e) => {
 
 app.addEventListener("change", (e) => {
   const t = e.target;
+  if (t.id === "po-date") {
+    poLoad(t.value);
+    return;
+  }
   if (t.dataset.wage) {
     const emp = employeeById(t.dataset.wage);
     const wage = parseMoney(t.value);
