@@ -5972,8 +5972,20 @@ body.sc-drag-resize * {
   }
   .pay-table th,
   .pay-table td {
-    padding-left: clamp(3px, 0.9vw, 16px);
-    padding-right: clamp(3px, 0.9vw, 16px);
+    padding-left: clamp(3px, 0.7vw, 12px);
+    padding-right: clamp(3px, 0.7vw, 12px);
+  }
+  /* 맨 끝 명세서 버튼이 박스 밖으로 잘리지 않게 오른쪽 여백을 따로 */
+  .pay-table th:first-child,
+  .pay-table td:first-child {
+    padding-left: clamp(8px, 1.2vw, 18px);
+  }
+  .pay-table th:last-child,
+  .pay-table td:last-child {
+    padding-right: clamp(8px, 1.2vw, 18px);
+  }
+  .pay-table td.ps-cell {
+    white-space: nowrap;
   }
   .pay-table th {
     font-size: clamp(11px, 1.05vw, 13px);
