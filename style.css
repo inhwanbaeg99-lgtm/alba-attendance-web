@@ -788,12 +788,16 @@ ul {
 
 /* ---------- 관리자 ---------- */
 .admin-top {
-  position: relative;
+  /* 스크롤해도 위에 붙어 있음 (매장 이름 · 직원 · 근무표 · 달력 · 급여 · 로그아웃) */
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: var(--bg);
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   gap: 10px;
-  padding: calc(40px + env(safe-area-inset-top, 0px)) 16px 0;
+  padding: calc(40px + env(safe-area-inset-top, 0px)) 16px 12px;
 }
 
 .admin-top a,
