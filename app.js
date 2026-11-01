@@ -2158,29 +2158,35 @@ function renderOrderReorder() {
     rows.push({ name, cat: c, text, rank, now: st.input, goal: st.goal });
   }
   rows.sort((x, y) => PO_CATEGORIES.indexOf(x.cat) - PO_CATEGORIES.indexOf(y.cat) || x.rank - y.rank);
-  const body = rows
-    .map(
-      (r, i) => `
-      <tr style="--i:${i}"${i && rows[i - 1].cat !== r.cat ? ' class="po-group"' : ""}>
-        <td class="muted" data-label="분류">${i && rows[i - 1].cat === r.cat ? "" : esc(r.cat)}</td>
-        <td class="name" data-label="발주 품목">${esc(r.name)}</td>
-        <td class="num muted" data-label="남은 수량">${esc(r.now)}</td>
-        <td class="num muted" data-label="기준">${esc(r.goal)}</td>
-        <td class="num strong" data-label="발주 수량">${r.text === "발주" ? `<span class="status po-short">발주</span>` : esc(r.text)}</td>
-      </tr>`,
-    )
-    .join("");
+  // 분류마다 따로 상자
+  const tables = PO_CATEGORIES.map((cat) => {
+    const list = rows.filter((r) => r.cat === cat);
+    if (!list.length) return "";
+    return `
+      <div class="section-head po-page-head"><h4>${esc(cat)}</h4><span class="muted small">${list.length}개</span></div>
+      <div class="table-wrap">
+        <table class="po-table">
+          <thead><tr><th>발주 품목</th><th class="num">남은 수량</th><th class="num">기준</th><th class="num">발주 수량</th></tr></thead>
+          <tbody>${list
+            .map(
+              (r, i) => `
+            <tr style="--i:${i}">
+              <td class="name" data-label="발주 품목">${esc(r.name)}</td>
+              <td class="num muted" data-label="남은 수량">${esc(r.now)}</td>
+              <td class="num muted" data-label="기준">${esc(r.goal)}</td>
+              <td class="num strong" data-label="발주 수량">${r.text === "발주" ? `<span class="status po-short">발주</span>` : esc(r.text)}</td>
+            </tr>`,
+            )
+            .join("")}</tbody>
+        </table>
+      </div>`;
+  }).join("");
   return `
     <div class="section-head">
       <h3>추가 발주</h3>
       <p class="totals">발주할 품목 <b>${rows.length}개</b></p>
     </div>
-    <div class="table-wrap">
-      <table class="po-table">
-        <thead><tr><th>분류</th><th>발주 품목</th><th class="num">남은 수량</th><th class="num">기준</th><th class="num">발주 수량</th></tr></thead>
-        <tbody>${body || `<tr><td colspan="5" class="empty">발주할 품목이 없어요.</td></tr>`}</tbody>
-      </table>
-    </div>`;
+    ${tables || `<div class="table-wrap"><p class="empty">발주할 품목이 없어요.</p></div>`}`;
 }
 
 function renderOrderStock() {

@@ -6009,9 +6009,6 @@ body.sc-drag-resize * {
 .po-table td {
   white-space: normal;
 }
-.po-table tr.po-group td {
-  border-top-color: color-mix(in srgb, var(--ink-sub) 35%, transparent);
-}
 .po-page-head {
   margin: 24px 0 8px;
 }
