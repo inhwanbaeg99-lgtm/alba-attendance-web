@@ -1553,8 +1553,8 @@ function renderPaySheet(emp) {
 // 주휴수당: 주는 일~토 기준이되 월 경계는 안 넘는다(엑셀 수식과 동일). 1일이 일요일이
 //   아니면 그 달 첫 주는 1일부터 그 주 토요일까지로 짧게(예: 1일이 화요일이면 화~토),
 //   말일도 토요일이 아니면 마지막 주가 말일까지로 짧게 끝난다.
-//   그 주의 소정근로시간(근무표의 고정 근무 시간)이 15시간 이상이고
-//   근무표상 근무일에 모두 출근했으면, 그 주 실근무시간을 기준으로
+//   그 주의 소정근로시간(근무표의 고정 근무 시간)이 15시간 이상이면
+//   (결근이 있어도 지급), 그 주 실근무시간을 기준으로
 //   (실근무시간 ÷ 40) × 8시간 × 시급  (40시간 이상이면 8시간분)
 //   원래 근로기준법 제55조상 주휴수당은 "소정근로시간" 기준이 원칙이지만,
 //   이 사업장은 실제 근무한 시간 기준으로 계산하기로 함(실무 관행).
@@ -1608,7 +1608,6 @@ function weeklyAllowance(emp, ym) {
     let reason = "";
     if (sun >= today) reason = "주가 아직 안 끝남";
     else if (planned < 15) reason = "소정근로 15시간 미만";
-    else if (days.some((x) => weeklyOn(emp, x)[weekdayOf(x)] && !recordFor(emp.id, x))) reason = "결근 있음";
     const allowHours = reason ? 0 : Math.min(hours, 40) / 5;
     weeks.push({ mon, sun, hours, planned, reason, allowHours, amount: Math.round((allowHours * emp.hourlyWage) / 10) * 10 });
     mon = nextMon;
