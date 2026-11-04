@@ -170,27 +170,7 @@ function initialData() {
   const scheduleMeta = { ...structuredClone(INITIAL_SCHEDULE_META), order: employees.map((e) => e.id) };
   const rank = (e) => (LIST_ORDER.includes(e.name) ? LIST_ORDER.indexOf(e.name) : LIST_ORDER.length);
   employees.sort((a, b) => rank(a) - rank(b));
-  const data = { employees, records: [], shifts: {}, filledFrom: FILL_FROM, scheduleMeta, orderSet: true };
-  fillSchedule(data, FILL_FROM, todayDateString());
-  return data;
-}
-
-// 9월 첫 주(8/31 월요일)부터 어제까지는 근무표대로 출근한 것으로 채운다.
-// 9/1 이 화요일이라, 그 주 주휴수당 계산을 위해 8/31 도 포함.
-const FILL_FROM = "2026-08-31";
-
-// from 이상 to 미만 날짜에, 근무표상 근무일인데 기록이 없으면 근무표 시간으로 기록을 넣는다
-function fillSchedule(data, from, to) {
-  const has = new Set(data.records.map((r) => `${r.employeeId}|${r.date}`));
-  for (let date = from; date < to; date = addDays(date, 1)) {
-    for (const e of data.employees) {
-      if (isManager(e)) continue;
-      const shift = e.weekly[weekdayOf(date)];
-      if (!shift || has.has(`${e.id}|${date}`)) continue;
-      const clockIn = kstIso(date, shift.start);
-      data.records.push({ id: uid(), employeeId: e.id, date, clockIn, clockOut: endIso(date, shift.start, shift.end), createdAt: clockIn, auto: true });
-    }
-  }
+  return { employees, records: [], shifts: {}, scheduleMeta, orderSet: true };
 }
 
 function loadStore() {
@@ -352,12 +332,6 @@ function isAdmin() {
 }
 
 fixPressedTimes();
-// 이미 저장된 데이터에 9월(8/31~) 기록이 없으면 한 번 채운다
-if (!store.filledFrom || store.filledFrom > FILL_FROM) {
-  const firstExisting = store.records.reduce((min, r) => (r.date < min ? r.date : min), todayDateString());
-  fillSchedule(store, FILL_FROM, firstExisting);
-  store.filledFrom = FILL_FROM;
-}
 // 근무표용 색·매니저·제목/비고가 없으면 한 번 넣는다
 if (!store.scheduleMeta) {
   for (const e of store.employees) e.color = e.color ?? INITIAL_COLORS[e.name] ?? "#ffffff";
@@ -387,7 +361,8 @@ save();
 // ---------- 근무표 변경 → 근무 기록 연동 ----------
 // 근무표 제목의 기간 시작일(예: "2026. 10. 5 ~ 11. 8" → 2026-10-05, 연도가 없으면 가까운 해)부터 오늘까지의 기록을 새 근무 시간에 맞춘다.
 // - 날짜별로 따로 수정한 날(store.shifts)은 건드리지 않는다
-// - 자동으로 채운 지난 기록: 시간 변경 / 근무 추가 시 생성 / 근무 삭제 시 제거
+// - 출근 기록은 새로 만들지 않는다 (직접 출근 또는 관리자 출근 처리로만 생긴다)
+// - 예전에 자동으로 채운 기록: 시간 변경 / 근무 삭제 시 제거
 // - 직접 출근한 기록: 시간만 맞추고 지우지는 않는다
 // 기간에 연도가 없으면 지금 판단한 연도를 앞에 붙여 고정한다.
 // (몇 달 뒤에 다시 판단하면 해가 바뀌어 보일 수 있으므로 저장할 때 박아 둔다)
@@ -424,7 +399,6 @@ function syncWeekday(emp, wd) {
       const clockIn = kstIso(date, shift.start);
       const clockOut = endIso(date, shift.start, shift.end);
       if (rec) Object.assign(rec, { clockIn, clockOut });
-      else if (date < today) store.records.push({ id: uid(), employeeId: emp.id, date, clockIn, clockOut, createdAt: clockIn, auto: true });
     } else if (rec?.auto) {
       store.records = store.records.filter((r) => r !== rec);
     }
@@ -5706,7 +5680,6 @@ function storeFromRemote() {
     scheduleDraft: main.scheduleDraft,
     absent: parse(pub.absent, null) ?? main.absent,
     // 이미 정리된 데이터이므로 예전 데이터 정리는 다시 하지 않는다
-    filledFrom: FILL_FROM,
     autoMarked: true,
     orderSet: true,
     timesFixed: true,
