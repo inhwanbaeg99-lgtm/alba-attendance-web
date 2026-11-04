@@ -4618,13 +4618,14 @@ function render() {
   const period = document.querySelector(".sc-period");
   if (period) fitPeriod(period);
   if (r.name === "schedule") positionSlotPop();
+  enhanceSelects();
   placeNavPill();
   if (state.pageEnter && r.name === "records") countUp(app.querySelectorAll(".pay-table td.net, .m-main .net"));
   // 카톡 복사 후 다음 직원으로 넘어갔음을 보여준다: 직원 칸 반짝, 표 새로 들어옴, 전송 버튼 두근
   // (저장 직후 다시 그려져도 이어서 돌도록 지난 시간만큼 앞당겨 시작)
   const flashMs = Date.now() - (state.nextFlashAt ?? 0);
   if (flashMs < 2600 && r.name === "records") {
-    for (const sel of ["#r-emp", ".ts-desktop", '[data-action="share-ts-image"]']) {
+    for (const sel of [".dd:has(#r-emp) .dd-btn", "#r-emp:not(.dd *)", ".ts-desktop", '[data-action="share-ts-image"]']) {
       const el = app.querySelector(sel);
       if (!el) continue;
       el.style.setProperty("--flash-t", `${flashMs}ms`);
@@ -4651,6 +4652,89 @@ function render() {
 
   if (r.name === "lock" && !document.getElementById("login-email")?.value) document.getElementById("login-email")?.focus();
 }
+
+// ---------- 드롭다운 (컴퓨터 화면) ----------
+// 브라우저 기본 select 목록은 모양을 바꿀 수 없어서, select 는 값만 들고 있게 숨기고 그 위에 사이트 모양의 목록을 띄운다.
+// 고르면 select 값을 바꾸고 change 를 내보내므로 저장 처리는 원래 코드 그대로다. 휴대폰은 기본 선택창을 쓴다.
+const DD_CHEVRON = svg(14, '<path d="m6 9 6 6 6-6"/>', 2.5);
+function enhanceSelects() {
+  if (!isDesktop()) return;
+  for (const sel of app.querySelectorAll("select.field")) {
+    const dd = document.createElement("div");
+    dd.className = "dd";
+    sel.before(dd);
+    dd.append(sel);
+    sel.tabIndex = -1;
+    const label = sel.selectedOptions[0]?.textContent ?? "";
+    dd.insertAdjacentHTML(
+      "beforeend",
+      `<button type="button" class="dd-btn" aria-haspopup="listbox" aria-expanded="false"${sel.disabled ? " disabled" : ""}${sel.getAttribute("aria-label") ? ` aria-label="${esc(sel.getAttribute("aria-label"))}"` : ""}><span>${esc(label)}</span>${DD_CHEVRON}</button>`,
+    );
+  }
+}
+function closeDropdowns() {
+  for (const dd of document.querySelectorAll(".dd.open")) {
+    dd.classList.remove("open");
+    dd.querySelector(".dd-list")?.remove();
+    dd.querySelector(".dd-btn")?.setAttribute("aria-expanded", "false");
+  }
+}
+function openDropdown(dd) {
+  closeDropdowns();
+  const sel = dd.querySelector("select");
+  const list = document.createElement("div");
+  list.className = "dd-list";
+  list.setAttribute("role", "listbox");
+  list.innerHTML = [...sel.options]
+    .map((o) => `<button type="button" class="dd-opt${o.selected ? " on" : ""}" role="option" aria-selected="${o.selected}" data-value="${esc(o.value)}">${esc(o.textContent)}</button>`)
+    .join("");
+  dd.append(list);
+  dd.classList.add("open");
+  dd.querySelector(".dd-btn").setAttribute("aria-expanded", "true");
+  // 화면 오른쪽을 넘어가면 오른쪽에 맞춰 연다
+  list.classList.toggle("right", list.getBoundingClientRect().right > document.documentElement.clientWidth - 8);
+  const on = list.querySelector(".dd-opt.on") ?? list.firstElementChild;
+  on?.focus({ preventScroll: true });
+  if (on) list.scrollTop = on.offsetTop - list.clientHeight / 2 + on.offsetHeight / 2;
+}
+function pickDropdown(opt) {
+  const dd = opt.closest(".dd");
+  const sel = dd.querySelector("select");
+  const changed = sel.value !== opt.dataset.value;
+  sel.value = opt.dataset.value;
+  dd.querySelector(".dd-btn span").textContent = opt.textContent;
+  closeDropdowns();
+  dd.querySelector(".dd-btn").focus({ preventScroll: true });
+  if (changed) sel.dispatchEvent(new Event("change", { bubbles: true }));
+}
+document.addEventListener("click", (e) => {
+  const opt = e.target.closest(".dd-opt");
+  if (opt) return pickDropdown(opt);
+  const btn = e.target.closest(".dd-btn");
+  if (!btn) return closeDropdowns();
+  const dd = btn.closest(".dd");
+  if (dd.classList.contains("open")) closeDropdowns();
+  else openDropdown(dd);
+});
+document.addEventListener("keydown", (e) => {
+  const opt = e.target.closest?.(".dd-opt");
+  if (!opt) {
+    if (e.target.closest?.(".dd-btn") && ["ArrowDown", "ArrowUp"].includes(e.key)) {
+      e.preventDefault();
+      openDropdown(e.target.closest(".dd"));
+    }
+    return;
+  }
+  const dd = opt.closest(".dd");
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    (e.key === "ArrowDown" ? opt.nextElementSibling : opt.previousElementSibling)?.focus();
+  } else if (e.key === "Escape" || e.key === "Tab") {
+    e.preventDefault();
+    closeDropdowns();
+    dd.querySelector(".dd-btn").focus({ preventScroll: true });
+  }
+});
 
 function navigate(hash) {
   endTour();
