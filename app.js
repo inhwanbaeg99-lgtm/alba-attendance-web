@@ -798,7 +798,7 @@ function shiftChangeRequests() {
 function renderEmployeeChangeStatus(empId, date) {
   const r = shiftChangeRequests().filter(r => r.employeeId === empId && r.date === date)
     .sort((a,b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
-  if (!r || r.status === "rejected") return "";
+  if (!r || ["pending", "processing", "rejected"].includes(r.status)) return "";
   const label = {pending:"승인 대기",processing:"승인 처리 중",approved:"승인 완료",rejected:"반려됨"}[r.status] || "";
   return `<p class="change-note">${esc(label)} · 요청 ${esc(r.start)} ~ ${esc(r.end)}</p>`;
 }
