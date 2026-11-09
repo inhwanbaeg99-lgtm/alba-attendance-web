@@ -703,7 +703,7 @@ function renderStaffItem(emp, date) {
       <button type="button" class="staff-name-btn" data-action="toggle-staff" data-id="${emp.id}"${editable ? "" : " disabled"}>
         <span class="staff-name">${nameLabel(emp, rec)}</span>
         ${done ? `<span class="badge done${rec.id === state.justAddedId ? " just" : ""}">출근 완료</span>` : ADMIN_SITE && date < today ? `<span class="badge none">기록 없음</span>` : ""}
-        <span class="staff-time${ADMIN_SITE && rec ? diffClass(emp, date, hoursBetween(rec.clockIn, rec.clockOut)) : ""}">${renderEmployeeChangeStatus(emp.id, date) || `${start} ~ ${end}`}</span>
+        <span class="staff-time${ADMIN_SITE && rec ? diffClass(emp, date, hoursBetween(rec.clockIn, rec.clockOut)) : ""}">${renderEmployeeChangeStatus(emp.id, date, start, end) || `${start} ~ ${end}`}</span>
       </button>
       ${action ? `<div class="staff-action${state.expandEnter ? " enter" : ""}">${action}</div>` : ""}
     </li>`;
@@ -805,19 +805,20 @@ function requestBaseline(emp, date, request) {
   return (emp && weeklyOn(emp, date)[weekdayOf(date)]) ||
     (request ? {start:request.beforeStart,end:request.beforeEnd} : shiftFor(emp,date));
 }
-function renderEmployeeChangeStatus(empId, date) {
+function renderEmployeeChangeStatus(empId, date, start, end) {
+  const emp = employeeById(empId);
+  if (!emp) return "";
   const r = shiftChangeRequests().filter(r => r.employeeId === empId && r.date === date)
     .sort((a,b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
-  if (!r || ["pending", "processing", "rejected"].includes(r.status)) return "";
-  if (r.status !== "approved") return "";
-  const emp = employeeById(empId);
-  // 관리자가 근무표대로 복원한 뒤에는 과거 승인 시간을 현재 시간처럼 표시하지 않는다.
-  const current = emp && shiftFor(emp, date);
-  if (!current || current.start !== r.start || current.end !== r.end) return "";
-  const baseline = requestBaseline(emp, date, r);
-  const worked = hoursBetween(kstIso(date, r.start), endIso(date, r.start, r.end));
-  const color = emp ? diffClass(emp, date, worked) : "";
-  return `<span class="approved-change">${esc(baseline.start)} ~ ${esc(baseline.end)} <span aria-label="변경 후">→</span> <strong class="approved-new-time${color}">${esc(r.start)} ~ ${esc(r.end)}</strong></span>`;
+  // 승인 요청과 현재 표시 시간이 같으면 고정한 기준 시간을 사용한다.
+  // 관리자 직접 수정은 그날 적용되는 원래 요일 근무표와 비교한다.
+  const approved = r?.status === "approved" && r.start === start && r.end === end;
+  const baseline = approved ? requestBaseline(emp, date, r) : weeklyOn(emp, date)[weekdayOf(date)];
+  if (!baseline || !start || !end) return "";
+  if (!approved && baseline.start === start && baseline.end === end) return "";
+  const worked = hoursBetween(kstIso(date, start), endIso(date, start, end));
+  const color = diffClass(emp, date, worked);
+  return `<span class="approved-change">${esc(baseline.start)} ~ ${esc(baseline.end)} <span aria-label="변경 후">→</span> <strong class="approved-new-time${color}">${esc(start)} ~ ${esc(end)}</strong></span>`;
 }
 function renderChangeRequests(date) {
   if (!isAdmin()) return "";
