@@ -6238,7 +6238,7 @@ body.sc-drag-resize * {
 .staff-action .action-row > [data-action="clock-in"] { grid-column: 2; }
 
 /* 관리자 달력: 요청이 있는 날짜 표시 */
-.change-date-badge{display:inline-flex;align-items:center;white-space:nowrap;padding:2px 5px;border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:10px;font-weight:700;line-height:1.4}
+.change-date-badge{display:inline-flex;align-items:center;white-space:nowrap;padding:2px 5px;border-radius:6px;background:var(--accent-soft);color:var(--red);font-size:10px;font-weight:700;line-height:1.4}
 .staff .change-inbox{padding:12px 11px;margin-bottom:18px}.staff .change-request{flex-direction:column;align-items:stretch;gap:8px}.staff .change-actions{justify-content:flex-end}
 
 /* 승인·반려도 수정·출근 처리와 같은 두 칸 버튼 */
