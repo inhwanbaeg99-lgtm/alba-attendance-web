@@ -679,6 +679,8 @@ function renderStaffItem(emp, date) {
   const start = ADMIN_SITE && rec ? formatTime(rec.clockIn) : shift.start;
   const end = ADMIN_SITE && rec ? formatTime(rec.clockOut) : shift.end;
   const expanded = editable && state.expandedId === emp.id;
+  const changePending = !ADMIN_SITE && shiftChangeRequests().some(r =>
+    r.employeeId === emp.id && r.date === date && ["pending", "processing"].includes(r.status));
 
   let action = "";
   if (expanded && state.editingWhere === "staff" && state.editingId === emp.id) {
@@ -686,7 +688,7 @@ function renderStaffItem(emp, date) {
   } else if (expanded) {
     action = `
       <div class="action-row">
-        <button type="button" class="btn-ghost" data-action="edit-shift" data-id="${emp.id}">${ADMIN_SITE ? "수정" : "수정 요청"}</button>
+        ${changePending ? "" : `<button type="button" class="btn-ghost" data-action="edit-shift" data-id="${emp.id}">${ADMIN_SITE ? "수정" : "수정 요청"}</button>`}
         ${!ADMIN_SITE && isToday && !done ? `<button type="button" class="btn-primary" data-action="clock-in" data-id="${emp.id}">출근</button>` : ""}
         ${ADMIN_SITE && !done && date <= today ? `<button type="button" class="btn-primary" data-action="admin-clock-in" data-id="${emp.id}">출근 처리</button>` : ""}
         ${ADMIN_SITE && done ? `<button type="button" class="btn-ghost danger-ghost" data-action="remove-record" data-id="${emp.id}">기록 삭제</button>` : ""}
