@@ -6240,3 +6240,9 @@ body.sc-drag-resize * {
 /* 관리자 달력: 요청이 있는 날짜 표시 */
 .change-date-badge{display:inline-flex;align-items:center;white-space:nowrap;padding:2px 5px;border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:10px;font-weight:700;line-height:1.4}
 .staff .change-inbox{padding:12px;margin-bottom:18px}.staff .change-request{flex-direction:column;align-items:stretch;gap:8px}.staff .change-actions{justify-content:flex-end}
+
+/* 승인·반려도 수정·출근 처리와 같은 두 칸 버튼 */
+.staff .change-actions { display:grid; grid-template-columns:1fr 1fr; gap:6px; width:100%; }
+.staff .change-actions button { width:100%; min-height:0; padding:10px 0; border-radius:999px; font-size:14px; font-weight:700; }
+.staff .change-actions [data-action="reject-shift-change"] { background:#ffeeee; color:var(--red); }
+@media(prefers-color-scheme:dark) { .staff .change-actions [data-action="reject-shift-change"] { background:rgb(255 107 117 / .16); } }
