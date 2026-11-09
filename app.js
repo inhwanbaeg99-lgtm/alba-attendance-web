@@ -816,7 +816,9 @@ function renderChangeRequests(date) {
   if (!rows.length) return "";
   return `<section class="change-inbox"><h3>근무 수정 요청 <span>${rows.length}건</span></h3>${rows.length ? rows.map(r => {
     const emp = employeeById(r.employeeId);
-    return `<article class="change-request"><div><b>${esc(emp?.name || "삭제된 직원")}</b><p>${esc(r.beforeStart)} ~ ${esc(r.beforeEnd)} → <strong>${esc(r.start)} ~ ${esc(r.end)}</strong></p>${r.reason ? `<p>${esc(r.reason)}</p>` : ""}</div><div class="change-actions action-row"><button type="button" class="btn-ghost" data-action="reject-shift-change" data-id="${r.id}"${r.status === "processing" ? " disabled" : ""}>반려</button><button type="button" class="btn-primary" data-action="approve-shift-change" data-id="${r.id}"${!emp || r.status === "processing" ? " disabled" : ""}>${r.status === "processing" ? "처리 중" : "승인"}</button></div></article>`;
+    const requestedHours = hoursBetween(kstIso(r.date, r.start), endIso(r.date, r.start, r.end));
+    const timeColor = emp ? diffClass(emp, r.date, requestedHours) : "";
+    return `<article class="change-request"><div><b>${esc(emp?.name || "삭제된 직원")}</b><p class="request-time${timeColor}">${esc(r.beforeStart)} ~ ${esc(r.beforeEnd)} → <strong>${esc(r.start)} ~ ${esc(r.end)}</strong></p>${r.reason ? `<p>${esc(r.reason)}</p>` : ""}</div><div class="change-actions action-row"><button type="button" class="btn-ghost" data-action="reject-shift-change" data-id="${r.id}"${r.status === "processing" ? " disabled" : ""}>반려</button><button type="button" class="btn-primary" data-action="approve-shift-change" data-id="${r.id}"${!emp || r.status === "processing" ? " disabled" : ""}>${r.status === "processing" ? "처리 중" : "승인"}</button></div></article>`;
   }).join("") : '<p class="change-note">대기 중인 요청이 없어요.</p>'}</section>`;
 }
 async function submitShiftChange(emp, date, start, end, reason, button) {
