@@ -804,7 +804,10 @@ function renderEmployeeChangeStatus(empId, date) {
     .sort((a,b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
   if (!r || ["pending", "processing", "rejected"].includes(r.status)) return "";
   if (r.status !== "approved") return "";
-  return `${esc(r.beforeStart)} ~ ${esc(r.beforeEnd)} <span aria-label="변경 후">→</span> <strong>${esc(r.start)} ~ ${esc(r.end)}</strong>`;
+  const emp = employeeById(empId);
+  const worked = hoursBetween(kstIso(date, r.start), endIso(date, r.start, r.end));
+  const color = emp ? diffClass(emp, date, worked) : "";
+  return `<span class="approved-change${color}">${esc(r.beforeStart)} ~ ${esc(r.beforeEnd)} <span aria-label="변경 후">→</span> <strong>${esc(r.start)} ~ ${esc(r.end)}</strong></span>`;
 }
 function renderChangeRequests(date) {
   if (!isAdmin()) return "";

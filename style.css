@@ -6246,3 +6246,9 @@ body.sc-drag-resize * {
 .staff .change-actions button { width:100%; }
 .staff .change-actions [data-action="reject-shift-change"] { background:#ffeeee; color:var(--red); }
 @media(prefers-color-scheme:dark) { .staff .change-actions [data-action="reject-shift-change"] { background:rgb(255 107 117 / .16); } }
+
+/* 승인된 변경 시간은 원래 요일 근무표의 총 시간과 비교 */
+.staff-time .approved-change{color:var(--ink)}
+.staff-time .approved-change.under{color:var(--red)}
+.staff-time .approved-change.over{color:#3182f6}
+.staff-time .approved-change strong{color:inherit}
