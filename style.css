@@ -6254,6 +6254,6 @@ body.sc-drag-resize * {
 .staff-time .approved-change strong{color:inherit}
 
 .change-request .request-time{color:var(--ink)}
-.change-request .request-time.under{color:var(--red)}
-.change-request .request-time.over{color:#3182f6}
+.change-request .request-time .request-new-time.under{color:var(--red)}
+.change-request .request-time .request-new-time.over{color:#3182f6}
 .change-request .request-time strong{color:inherit}
