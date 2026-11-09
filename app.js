@@ -188,7 +188,7 @@ function fixPressedTimes() {
   if (store.timesFixed) return;
   for (const r of store.records) {
     const emp = employeeById(r.employeeId);
-    if (!emp) continue;
+    if (!emp || r.punchedAt) continue;
     r.clockIn = kstIso(r.date, shiftFor(emp, r.date).start);
     r.clockOut = scheduledEnd(emp, r.date);
   }
@@ -261,22 +261,28 @@ function scheduledEnd(emp, date) {
   return endIso(date, start, end);
 }
 
-// 출근은 오늘 날짜에만 기록된다 (미래 날짜에는 출근 버튼이 나오지 않음)
+// 실제 출근 시각을 가장 가까운 10분으로 반올림 (5분부터 올림).
+function roundedClockIn(now) {
+  const tenMinutes = 10 * 60 * 1000;
+  return new Date(Math.round(now.getTime() / tenMinutes) * tenMinutes).toISOString();
+}
+
+// 출근일은 누른 실제 날짜, 급여 시작 시각은 10분 단위 반올림 시각.
 function clockIn(employeeId) {
   const emp = employeeById(employeeId);
   if (!emp || !emp.active) return "직원을 찾을 수 없습니다.";
-  const date = todayDateString();
+  const now = new Date();
+  const date = dateStringFor(now);
   if (recordFor(employeeId, date)?.clockIn) return "이미 출근 처리되었습니다.";
-  // 누른 시각이 아니라 그날 근무 시간대로 출퇴근을 기록한다
-  const { start } = shiftFor(emp, date);
   store.records.push({
     manual: true,
     id: uid(),
     employeeId,
     date,
-    clockIn: kstIso(date, start),
+    clockIn: roundedClockIn(now),
     clockOut: scheduledEnd(emp, date),
-    createdAt: new Date().toISOString(),
+    punchedAt: now.toISOString(),
+    createdAt: now.toISOString(),
     ...(traineeOn(emp, date) ? { training: true } : {}),
   });
   save();
@@ -393,7 +399,7 @@ function syncWeekday(emp, wd) {
     if (String(weekdayOf(date)) !== String(wd) || store.shifts[date]?.[emp.id]) continue;
     const shift = emp.weekly[wd];
     const rec = recordFor(emp.id, date);
-    if (rec?.edited) continue; // 관리자가 달력에서 직접 고친 날
+    if (rec?.edited || rec?.punchedAt) continue; // 직접 수정 또는 실제 출근 기록은 근무표로 덮어쓰지 않음
     if (store.absent?.[`${emp.id}|${date}`]) continue; // 관리자가 기록을 지운 날 (결근)
     if (shift) {
       const clockIn = kstIso(date, shift.start);
@@ -4965,7 +4971,7 @@ app.addEventListener("click", (e) => {
       // 이미 출근했다면 기록 시간도 함께 고친다
       const rec = recordFor(id, date);
       if (rec) {
-        rec.clockIn = kstIso(date, start);
+        if (!rec.punchedAt) rec.clockIn = kstIso(date, start);
         rec.clockOut = scheduledEnd(emp, date);
       }
       save();
