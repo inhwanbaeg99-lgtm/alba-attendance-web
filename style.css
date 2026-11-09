@@ -6233,3 +6233,6 @@ body.sc-drag-resize * {
 .change-request{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 0;border-top:1px solid var(--line)}
 .change-request p{font-size:13px;line-height:1.6;margin:6px 0;overflow-wrap:anywhere}.change-actions{display:flex;gap:8px;flex-shrink:0}
 @media(max-width:767px){.change-request{align-items:stretch;flex-direction:column}.change-actions{justify-content:flex-end}.change-actions button{min-height:44px}}
+
+/* 수정 요청이 숨겨져도 직원 출근 버튼은 오른쪽 칸 유지 */
+.staff-action .action-row > [data-action="clock-in"] { grid-column: 2; }
