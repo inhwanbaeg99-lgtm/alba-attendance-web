@@ -714,10 +714,9 @@ function renderTimeEditor(empId, start, end) {
       <span>~</span>
       ${timeInput("edit-end", end, "종료 시간")}
     </div>
-    ${ADMIN_SITE ? "" : '<label class="change-reason">수정 사유 (선택)<textarea id="change-reason" maxlength="300" rows="2" placeholder="변경이 필요한 이유를 적어주세요"></textarea></label><p class="change-note">관리자가 승인하면 근무시간과 급여에 반영돼요.</p>'}
     <div class="action-row">
       <button type="button" class="btn-ghost" data-action="cancel-edit">취소</button>
-      <button type="button" class="btn-primary" data-action="save-shift" data-id="${empId}">${ADMIN_SITE ? "저장" : "요청 보내기"}</button>
+      <button type="button" class="btn-primary" data-action="save-shift" data-id="${empId}">${ADMIN_SITE ? "저장" : "요청"}</button>
     </div>
     ${state.error ? `<p class="error">${esc(state.error)}</p>` : ""}`;
 }
@@ -799,7 +798,7 @@ function shiftChangeRequests() {
 function renderEmployeeChangeStatus(empId, date) {
   const r = shiftChangeRequests().filter(r => r.employeeId === empId && r.date === date)
     .sort((a,b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
-  if (!r) return "";
+  if (!r || r.status === "rejected") return "";
   const label = {pending:"승인 대기",processing:"승인 처리 중",approved:"승인 완료",rejected:"반려됨"}[r.status] || "";
   return `<p class="change-note">${esc(label)} · 요청 ${esc(r.start)} ~ ${esc(r.end)}</p>`;
 }
