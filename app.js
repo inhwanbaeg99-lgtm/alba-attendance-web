@@ -273,11 +273,16 @@ function employeeClockInTime(emp, date, now) {
   const wd = weekdayOf(date);
   const opening = wd === 0 || wd === 6 ? "08:00" : "07:00";
   const { start } = shiftFor(emp, date);
-  const scheduled = kstIso(date, opening);
-  if (start === opening && now.getTime() < new Date(scheduled).getTime() + 16 * 60 * 1000) {
+  const scheduled = kstIso(date, start);
+  const scheduledMs = new Date(scheduled).getTime();
+  // 모든 근무: 예정 시각보다 일찍 눌러도 예정 시작 시각부터 계산한다.
+  if (now.getTime() <= scheduledMs) return scheduled;
+  if (start === opening && now.getTime() < scheduledMs + 16 * 60 * 1000) {
     return scheduled;
   }
-  return roundedClockIn(now);
+  // 늦은 출근은 기존 반올림 유지. 반올림해도 예정 시작 전으로 가지 않게 한다.
+  const rounded = roundedClockIn(now);
+  return new Date(rounded).getTime() < scheduledMs ? scheduled : rounded;
 }
 
 // 출근일은 누른 실제 날짜, 급여 시작 시각은 10분 단위 반올림 시각.
