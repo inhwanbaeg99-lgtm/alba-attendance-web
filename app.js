@@ -267,6 +267,19 @@ function roundedClockIn(now) {
   return new Date(Math.round(now.getTime() / tenMinutes) * tenMinutes).toISOString();
 }
 
+// 오픈 근무만 시작 후 15분대까지 정시 출근 처리 (이른 출근도 정시).
+// 평일 07:00 / 토·일 08:00 시작 근무에만 적용한다.
+function employeeClockInTime(emp, date, now) {
+  const wd = weekdayOf(date);
+  const opening = wd === 0 || wd === 6 ? "08:00" : "07:00";
+  const { start } = shiftFor(emp, date);
+  const scheduled = kstIso(date, opening);
+  if (start === opening && now.getTime() < new Date(scheduled).getTime() + 16 * 60 * 1000) {
+    return scheduled;
+  }
+  return roundedClockIn(now);
+}
+
 // 출근일은 누른 실제 날짜, 급여 시작 시각은 10분 단위 반올림 시각.
 function clockIn(employeeId) {
   const emp = employeeById(employeeId);
@@ -279,7 +292,7 @@ function clockIn(employeeId) {
     id: uid(),
     employeeId,
     date,
-    clockIn: roundedClockIn(now),
+    clockIn: employeeClockInTime(emp, date, now),
     clockOut: scheduledEnd(emp, date),
     punchedAt: now.toISOString(),
     createdAt: now.toISOString(),
