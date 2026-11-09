@@ -597,6 +597,7 @@ function renderCalendar() {
     .map((date, i) => {
       if (!date) return `<div class="empty-cell"></div>`;
       const entries = recordsOn(date);
+      const pendingChanges = isAdmin() ? shiftChangeRequests().filter(r => r.date === date && ["pending", "processing"].includes(r.status)).length : 0;
       const holiday = HOLIDAYS[date];
       const isRest = i % 7 === 0 || Boolean(holiday);
       const numClass = date === today ? "today" : isRest ? "rest" : "";
@@ -612,6 +613,7 @@ function renderCalendar() {
         <button type="button" class="cell${date === selectedDate ? " selected" : ""}" data-date="${date}">
           <span class="cell-top">
             <span class="day-num ${numClass}">${Number(date.slice(-2))}</span>
+            ${pendingChanges ? `<span class="change-date-badge" aria-label="근무 수정 요청 ${pendingChanges}건">요청 ${pendingChanges}</span>` : ""}
             ${holiday ? `<span class="chip holiday">${esc(holiday)}</span>` : ""}
           </span>
           <span class="dot${entries.length ? " on" : ""}"></span>
@@ -758,6 +760,7 @@ function renderStaff(date) {
 
   return `
     <section class="staff" aria-label="근무자">
+      ${ADMIN_SITE ? renderChangeRequests(date) : ""}
       <p class="staff-title">${isToday ? "오늘 근무자" : "근무 예정"}</p>
       <p class="sub">${sub}</p>
       <ul class="staff-list">
@@ -804,10 +807,11 @@ function renderEmployeeChangeStatus(empId, date) {
   const label = {pending:"승인 대기",processing:"승인 처리 중",approved:"승인 완료",rejected:"반려됨"}[r.status] || "";
   return `<p class="change-note">${esc(label)} · 요청 ${esc(r.start)} ~ ${esc(r.end)}</p>`;
 }
-function renderChangeRequests() {
+function renderChangeRequests(date) {
   if (!isAdmin()) return "";
-  const rows = shiftChangeRequests().filter(r => ["pending", "processing"].includes(r.status))
+  const rows = shiftChangeRequests().filter(r => r.date === date && ["pending", "processing"].includes(r.status))
     .sort((a,b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+  if (!rows.length) return "";
   return `<section class="change-inbox"><h3>근무 수정 요청 <span>${rows.length}건</span></h3>${rows.length ? rows.map(r => {
     const emp = employeeById(r.employeeId);
     return `<article class="change-request"><div><b>${esc(emp?.name || "삭제된 직원")} · ${esc(r.date)}</b><p>기존 ${esc(r.beforeStart)} ~ ${esc(r.beforeEnd)} → <strong>${esc(r.start)} ~ ${esc(r.end)}</strong></p>${r.reason ? `<p>${esc(r.reason)}</p>` : ""}</div><div class="change-actions"><button type="button" class="btn-ghost" data-action="reject-shift-change" data-id="${r.id}"${r.status === "processing" ? " disabled" : ""}>반려</button><button type="button" class="btn-primary" data-action="approve-shift-change" data-id="${r.id}"${!emp || r.status === "processing" ? " disabled" : ""}>${r.status === "processing" ? "처리 중" : "승인"}</button></div></article>`;
@@ -872,7 +876,7 @@ async function reviewShiftChange(id, approve, button) {
 
 // 관리자 달력: 직원용 달력과 같은 화면. 출근 버튼은 없고 지난 날짜도 근무 시간을 고칠 수 있다.
 function renderAdminCalendar() {
-  return renderAdminShell("calendar", `${isDesktop() ? "" : mHead("달력")}${renderChangeRequests()}<div class="admin-cal">${renderCalendarCard()}</div>`, { center: true, wide: true });
+  return renderAdminShell("calendar", `${isDesktop() ? "" : mHead("달력")}<div class="admin-cal">${renderCalendarCard()}</div>`, { center: true, wide: true });
 }
 
 function renderDayPage(date) {
