@@ -799,15 +799,22 @@ function shiftChangeRequests() {
     .filter(([id, r]) => safeId(id) && r && safeId(r.employeeId) && safeDate(r.date) && cleanRange(r))
     .map(([id, r]) => ({ ...r, id }));
 }
+// 기존 시간은 직전 수정 기록이 아니라 원래 근무표에서 한 번 정해 유지한다.
+function requestBaseline(emp, date, request) {
+  if (request?.baselineVersion === 1) return {start:request.beforeStart,end:request.beforeEnd};
+  return (emp && weeklyOn(emp, date)[weekdayOf(date)]) ||
+    (request ? {start:request.beforeStart,end:request.beforeEnd} : shiftFor(emp,date));
+}
 function renderEmployeeChangeStatus(empId, date) {
   const r = shiftChangeRequests().filter(r => r.employeeId === empId && r.date === date)
     .sort((a,b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
   if (!r || ["pending", "processing", "rejected"].includes(r.status)) return "";
   if (r.status !== "approved") return "";
   const emp = employeeById(empId);
+  const baseline = requestBaseline(emp, date, r);
   const worked = hoursBetween(kstIso(date, r.start), endIso(date, r.start, r.end));
   const color = emp ? diffClass(emp, date, worked) : "";
-  return `<span class="approved-change${color}">${esc(r.beforeStart)} ~ ${esc(r.beforeEnd)} <span aria-label="변경 후">→</span> <strong>${esc(r.start)} ~ ${esc(r.end)}</strong></span>`;
+  return `<span class="approved-change${color}">${esc(baseline.start)} ~ ${esc(baseline.end)} <span aria-label="변경 후">→</span> <strong>${esc(r.start)} ~ ${esc(r.end)}</strong></span>`;
 }
 function renderChangeRequests(date) {
   if (!isAdmin()) return "";
@@ -816,9 +823,10 @@ function renderChangeRequests(date) {
   if (!rows.length) return "";
   return `<section class="change-inbox"><h3>근무 수정 요청 <span>${rows.length}건</span></h3>${rows.length ? rows.map(r => {
     const emp = employeeById(r.employeeId);
+    const baseline = requestBaseline(emp, r.date, r);
     const requestedHours = hoursBetween(kstIso(r.date, r.start), endIso(r.date, r.start, r.end));
     const timeColor = emp ? diffClass(emp, r.date, requestedHours) : "";
-    return `<article class="change-request"><div><b>${esc(emp?.name || "삭제된 직원")}</b><p class="request-time${timeColor}">${esc(r.beforeStart)} ~ ${esc(r.beforeEnd)} → <strong>${esc(r.start)} ~ ${esc(r.end)}</strong></p>${r.reason ? `<p>${esc(r.reason)}</p>` : ""}</div><div class="change-actions action-row"><button type="button" class="btn-ghost" data-action="reject-shift-change" data-id="${r.id}"${r.status === "processing" ? " disabled" : ""}>반려</button><button type="button" class="btn-primary" data-action="approve-shift-change" data-id="${r.id}"${!emp || r.status === "processing" ? " disabled" : ""}>${r.status === "processing" ? "처리 중" : "승인"}</button></div></article>`;
+    return `<article class="change-request"><div><b>${esc(emp?.name || "삭제된 직원")}</b><p class="request-time${timeColor}">${esc(baseline.start)} ~ ${esc(baseline.end)} → <strong>${esc(r.start)} ~ ${esc(r.end)}</strong></p>${r.reason ? `<p>${esc(r.reason)}</p>` : ""}</div><div class="change-actions action-row"><button type="button" class="btn-ghost" data-action="reject-shift-change" data-id="${r.id}"${r.status === "processing" ? " disabled" : ""}>반려</button><button type="button" class="btn-primary" data-action="approve-shift-change" data-id="${r.id}"${!emp || r.status === "processing" ? " disabled" : ""}>${r.status === "processing" ? "처리 중" : "승인"}</button></div></article>`;
   }).join("") : '<p class="change-note">대기 중인 요청이 없어요.</p>'}</section>`;
 }
 async function submitShiftChange(emp, date, start, end, reason, button) {
@@ -828,12 +836,10 @@ async function submitShiftChange(emp, date, start, end, reason, button) {
   try {
     // 직원·날짜당 하나의 대기 요청: 동시에 눌러도 transaction으로 중복 접수 방지.
     const key = emp.id + "_" + date;
-    const rec = recordFor(emp.id, date), shift = shiftFor(emp, date);
-    const beforeStart = rec ? formatTime(rec.clockIn) : shift.start;
-    const beforeEnd = rec ? formatTime(rec.clockOut) : shift.end;
     const result = await cloud.db.ref("public/changeRequests/" + key).transaction(old => {
       if (old && ["pending","processing"].includes(old.status)) return;
-      return {employeeId:emp.id,date,start,end,beforeStart,beforeEnd,reason:reason.slice(0,300),status:"pending",createdAt:new Date().toISOString()};
+      const baseline = requestBaseline(emp, date, old);
+      return {employeeId:emp.id,date,start,end,beforeStart:baseline.start,beforeEnd:baseline.end,baselineVersion:1,reason:reason.slice(0,300),status:"pending",createdAt:new Date().toISOString()};
     });
     if (!result.committed) throw new Error("이미 승인 대기 중인 요청이 있어요.");
     state.error = ""; state.editingId = null; state.editingWhere = null;
@@ -847,7 +853,11 @@ async function reviewShiftChange(id, approve, button) {
   const ref = cloud.db.ref("public/changeRequests/" + id);
   let claimed = false;
   try {
-    const result = await ref.transaction(r => r?.status === "pending" ? {...r,status:"processing"} : undefined);
+    const result = await ref.transaction(r => {
+      if (r?.status !== "pending") return;
+      const baseline = requestBaseline(employeeById(r.employeeId), r.date, r);
+      return {...r,beforeStart:baseline.start,beforeEnd:baseline.end,baselineVersion:1,status:"processing"};
+    });
     if (!result.committed) throw new Error("이미 처리됐거나 처리 중인 요청이에요.");
     claimed = true;
     const r = result.snapshot.val();
