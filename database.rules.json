@@ -1,0 +1,36 @@
+{
+  "rules": {
+    "public": {
+      ".read": true,
+      ".write": "auth != null",
+      "records": {
+        "$id": {
+          ".write": "auth != null || newData.exists()",
+          ".validate": "newData.isString() && newData.val().length < 2000"
+        }
+      },
+      "shifts": {
+        "$date": {
+          ".write": "auth != null || newData.exists()",
+          ".validate": "newData.isString() && newData.val().length < 10000"
+        }
+      },
+      "employees": {
+        "$id": {
+          ".write": "auth != null || !data.exists()",
+          ".validate": "newData.isString() && newData.val().length < 50000"
+        }
+      },
+      "changeRequests": {
+        "$id": {
+          ".write": "auth != null || (newData.exists() && newData.child('status').val() === 'pending' && (!data.exists() || data.child('status').val() === 'approved' || data.child('status').val() === 'rejected'))",
+          ".validate": "newData.hasChildren(['employeeId','date','start','end','beforeStart','beforeEnd','status','createdAt']) && newData.child('employeeId').isString() && newData.child('employeeId').val().length <= 64 && newData.child('date').isString() && newData.child('date').val().matches(/^\\d{4}-\\d{2}-\\d{2}$/) && newData.child('start').isString() && newData.child('start').val().matches(/^([01][0-9]|2[0-3]):[0-5][0-9]$/) && newData.child('end').isString() && newData.child('end').val().matches(/^([01][0-9]|2[0-3]):[0-5][0-9]$/) && newData.child('start').val() !== newData.child('end').val() && newData.child('createdAt').isString() && (!newData.child('reason').exists() || (newData.child('reason').isString() && newData.child('reason').val().length <= 300)) && (newData.child('status').val() === 'pending' || newData.child('status').val() === 'processing' || newData.child('status').val() === 'approved' || newData.child('status').val() === 'rejected')"
+        }
+      }
+    },
+    "private": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    }
+  }
+}

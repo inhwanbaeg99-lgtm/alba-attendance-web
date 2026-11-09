@@ -6223,3 +6223,13 @@ body.sc-drag-resize * {
 .sheet .dd {
   display: block;
 }
+
+/* 근무 수정 요청 */
+.change-note{font-size:13px;line-height:1.6;color:var(--ink-sub);margin:10px 0}
+.change-reason{display:grid;gap:6px;margin:12px 0;font-size:13px;text-align:left}
+.change-reason textarea{width:100%;box-sizing:border-box;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit}
+.change-inbox{width:100%;max-width:1000px;margin:0 auto 24px;padding:18px;box-sizing:border-box;border:1px solid var(--line);border-radius:16px;background:var(--paper)}
+.change-inbox h3{margin:0 0 12px;font-size:17px}.change-inbox h3 span{color:var(--accent)}
+.change-request{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 0;border-top:1px solid var(--line)}
+.change-request p{font-size:13px;line-height:1.6;margin:6px 0;overflow-wrap:anywhere}.change-actions{display:flex;gap:8px;flex-shrink:0}
+@media(max-width:767px){.change-request{align-items:stretch;flex-direction:column}.change-actions{justify-content:flex-end}.change-actions button{min-height:44px}}

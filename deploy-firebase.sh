@@ -6,6 +6,6 @@ cd "$(dirname "$0")"
 rm -rf _site
 mkdir _site
 git archive HEAD | tar -x -C _site
-rm -f _site/firebase.json _site/.firebaserc _site/deploy-firebase.sh _site/README.md
+rm -f _site/firebase.json _site/.firebaserc _site/deploy-firebase.sh _site/README.md _site/database.rules.json
 "$HOME/.npm-global/bin/firebase" deploy --only hosting --project mgc-attendance
 rm -rf _site

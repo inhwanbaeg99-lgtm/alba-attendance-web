@@ -2,12 +2,22 @@
   "hosting": {
     "public": "_site",
     "cleanUrls": true,
-    "ignore": ["**/.*"],
+    "ignore": [
+      "**/.*"
+    ],
     "headers": [
       {
         "source": "**",
-        "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
       }
     ]
+  },
+  "database": {
+    "rules": "database.rules.json"
   }
 }

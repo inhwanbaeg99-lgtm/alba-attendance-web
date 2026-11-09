@@ -686,7 +686,7 @@ function renderStaffItem(emp, date) {
   } else if (expanded) {
     action = `
       <div class="action-row">
-        <button type="button" class="btn-ghost" data-action="edit-shift" data-id="${emp.id}">수정</button>
+        <button type="button" class="btn-ghost" data-action="edit-shift" data-id="${emp.id}">${ADMIN_SITE ? "수정" : "수정 요청"}</button>
         ${!ADMIN_SITE && isToday && !done ? `<button type="button" class="btn-primary" data-action="clock-in" data-id="${emp.id}">출근</button>` : ""}
         ${ADMIN_SITE && !done && date <= today ? `<button type="button" class="btn-primary" data-action="admin-clock-in" data-id="${emp.id}">출근 처리</button>` : ""}
         ${ADMIN_SITE && done ? `<button type="button" class="btn-ghost danger-ghost" data-action="remove-record" data-id="${emp.id}">기록 삭제</button>` : ""}
@@ -701,6 +701,7 @@ function renderStaffItem(emp, date) {
         ${done ? `<span class="badge done${rec.id === state.justAddedId ? " just" : ""}">출근 완료</span>` : ADMIN_SITE && date < today ? `<span class="badge none">기록 없음</span>` : ""}
         <span class="staff-time${ADMIN_SITE && rec ? diffClass(emp, date, hoursBetween(rec.clockIn, rec.clockOut)) : ""}">${start} ~ ${end}</span>
       </button>
+      ${renderEmployeeChangeStatus(emp.id, date)}
       ${action ? `<div class="staff-action${state.expandEnter ? " enter" : ""}">${action}</div>` : ""}
     </li>`;
 }
@@ -713,9 +714,10 @@ function renderTimeEditor(empId, start, end) {
       <span>~</span>
       ${timeInput("edit-end", end, "종료 시간")}
     </div>
+    ${ADMIN_SITE ? "" : '<label class="change-reason">수정 사유 (선택)<textarea id="change-reason" maxlength="300" rows="2" placeholder="변경이 필요한 이유를 적어주세요"></textarea></label><p class="change-note">관리자가 승인하면 근무시간과 급여에 반영돼요.</p>'}
     <div class="action-row">
       <button type="button" class="btn-ghost" data-action="cancel-edit">취소</button>
-      <button type="button" class="btn-primary" data-action="save-shift" data-id="${empId}">저장</button>
+      <button type="button" class="btn-primary" data-action="save-shift" data-id="${empId}">${ADMIN_SITE ? "저장" : "요청 보내기"}</button>
     </div>
     ${state.error ? `<p class="error">${esc(state.error)}</p>` : ""}`;
 }
@@ -788,9 +790,88 @@ function renderHome() {
     ${toastHtml()}`;
 }
 
+// 근무시간 수정 요청: 원래 기록은 승인 전까지 변경하지 않는다.
+function shiftChangeRequests() {
+  return Object.entries(remote?.pub?.changeRequests ?? store.changeRequests ?? {})
+    .filter(([id, r]) => safeId(id) && r && safeId(r.employeeId) && safeDate(r.date) && cleanRange(r))
+    .map(([id, r]) => ({ ...r, id }));
+}
+function renderEmployeeChangeStatus(empId, date) {
+  const r = shiftChangeRequests().filter(r => r.employeeId === empId && r.date === date)
+    .sort((a,b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
+  if (!r) return "";
+  const label = {pending:"승인 대기",processing:"승인 처리 중",approved:"승인 완료",rejected:"반려됨"}[r.status] || "";
+  return `<p class="change-note">${esc(label)} · 요청 ${esc(r.start)} ~ ${esc(r.end)}</p>`;
+}
+function renderChangeRequests() {
+  if (!isAdmin()) return "";
+  const rows = shiftChangeRequests().filter(r => ["pending", "processing"].includes(r.status))
+    .sort((a,b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+  return `<section class="change-inbox"><h3>근무 수정 요청 <span>${rows.length}건</span></h3>${rows.length ? rows.map(r => {
+    const emp = employeeById(r.employeeId);
+    return `<article class="change-request"><div><b>${esc(emp?.name || "삭제된 직원")} · ${esc(r.date)}</b><p>기존 ${esc(r.beforeStart)} ~ ${esc(r.beforeEnd)} → <strong>${esc(r.start)} ~ ${esc(r.end)}</strong></p>${r.reason ? `<p>${esc(r.reason)}</p>` : ""}</div><div class="change-actions"><button type="button" class="btn-ghost" data-action="reject-shift-change" data-id="${r.id}"${r.status === "processing" ? " disabled" : ""}>반려</button><button type="button" class="btn-primary" data-action="approve-shift-change" data-id="${r.id}"${!emp || r.status === "processing" ? " disabled" : ""}>${r.status === "processing" ? "처리 중" : "승인"}</button></div></article>`;
+  }).join("") : '<p class="change-note">대기 중인 요청이 없어요.</p>'}</section>`;
+}
+async function submitShiftChange(emp, date, start, end, reason, button) {
+  if (!cloud || !remote.pubLoaded) { state.error = "온라인 연결 후 다시 요청해주세요."; render(); return; }
+  if (!emp || !cleanRange({start,end}) || start === end) return;
+  button.disabled = true;
+  try {
+    // 직원·날짜당 하나의 대기 요청: 동시에 눌러도 transaction으로 중복 접수 방지.
+    const key = emp.id + "_" + date;
+    const rec = recordFor(emp.id, date), shift = shiftFor(emp, date);
+    const beforeStart = rec ? formatTime(rec.clockIn) : shift.start;
+    const beforeEnd = rec ? formatTime(rec.clockOut) : shift.end;
+    const result = await cloud.db.ref("public/changeRequests/" + key).transaction(old => {
+      if (old && ["pending","processing"].includes(old.status)) return;
+      return {employeeId:emp.id,date,start,end,beforeStart,beforeEnd,reason:reason.slice(0,300),status:"pending",createdAt:new Date().toISOString()};
+    });
+    if (!result.committed) throw new Error("이미 승인 대기 중인 요청이 있어요.");
+    state.error = ""; state.editingId = null; state.editingWhere = null;
+    queueToast("수정 요청을 보냈어요. 승인 후 반영돼요."); render();
+  } catch (err) { state.error = err.message || "요청을 보내지 못했어요."; render(); }
+}
+async function reviewShiftChange(id, approve, button) {
+  if (!isAdmin() || !cloud || !safeId(id)) return;
+  if (!(await uiConfirm(approve ? "요청한 근무시간을 승인하고 급여에 반영할까요?" : "이 수정 요청을 반려할까요?", {ok:approve ? "승인" : "반려"}))) return;
+  button.disabled = true;
+  const ref = cloud.db.ref("public/changeRequests/" + id);
+  let claimed = false;
+  try {
+    const result = await ref.transaction(r => r?.status === "pending" ? {...r,status:"processing"} : undefined);
+    if (!result.committed) throw new Error("이미 처리됐거나 처리 중인 요청이에요.");
+    claimed = true;
+    const r = result.snapshot.val();
+    const updates = {};
+    if (approve) {
+      const emp = employeeById(r.employeeId);
+      if (!emp || !safeDate(r.date) || !cleanRange(r) || r.start === r.end) throw new Error("직원 또는 요청 시간을 확인해주세요.");
+      // 최신 서버 값을 기준으로 같은 날짜의 다른 직원 정보를 보존한다.
+      const [daySnap, recSnap] = await Promise.all([cloud.db.ref("public/shifts/"+r.date).once("value"),cloud.db.ref("public/records").once("value")]);
+      const day = parse(daySnap.val(), {});
+      const old = Object.values(recSnap.val() || {}).map(x=>parse(x,null)).find(x=>x?.employeeId===r.employeeId && x.date===r.date);
+      if (old || r.date < todayDateString()) {
+        const rec = {...(old || {id:uid(),employeeId:r.employeeId,date:r.date,createdAt:new Date().toISOString(),...(traineeOn(emp,r.date)?{training:true}:{})}),clockIn:kstIso(r.date,r.start),clockOut:endIso(r.date,r.start,r.end),edited:true};
+        updates["public/records/"+rec.id] = JSON.stringify(rec);
+      }
+      updates["public/shifts/"+r.date] = JSON.stringify({...day,[r.employeeId]:{start:r.start,end:r.end}});
+    }
+    updates["public/changeRequests/"+id+"/status"] = approve ? "approved" : "rejected";
+    updates["public/changeRequests/"+id+"/reviewedAt"] = new Date().toISOString();
+    updates["public/changeRequests/"+id+"/reviewedBy"] = cloud.auth.currentUser.uid;
+    await cloud.db.ref().update(updates);
+    claimed = false;
+    if (approve) queueSlipPublish();
+    showToast(approve ? "승인했어요. 근무시간과 급여에 반영됐어요." : "요청을 반려했어요.");
+  } catch(err) {
+    if (claimed) await ref.child("status").set("pending").catch(()=>{});
+    button.disabled = false; uiAlert(err.message || "처리하지 못했어요. 다시 시도해주세요.");
+  }
+}
+
 // 관리자 달력: 직원용 달력과 같은 화면. 출근 버튼은 없고 지난 날짜도 근무 시간을 고칠 수 있다.
 function renderAdminCalendar() {
-  return renderAdminShell("calendar", `${isDesktop() ? "" : mHead("달력")}<div class="admin-cal">${renderCalendarCard()}</div>`, { center: true, wide: true });
+  return renderAdminShell("calendar", `${isDesktop() ? "" : mHead("달력")}${renderChangeRequests()}<div class="admin-cal">${renderCalendarCard()}</div>`, { center: true, wide: true });
 }
 
 function renderDayPage(date) {
@@ -4956,6 +5037,10 @@ app.addEventListener("click", (e) => {
       state.editingId = null;
       state.editingWhere = null;
       break;
+    case "approve-shift-change":
+    case "reject-shift-change":
+      reviewShiftChange(id, action === "approve-shift-change", el);
+      return;
     case "save-shift": {
       const start = readTime("edit-start");
       const end = readTime("edit-end");
@@ -4969,6 +5054,10 @@ app.addEventListener("click", (e) => {
       }
       const date = activeDate();
       const emp = employeeById(id);
+      if (!ADMIN_SITE) {
+        submitShiftChange(emp, date, start, end, document.getElementById("change-reason")?.value.trim() || "", el);
+        return;
+      }
       // 관리자: 지난 날짜는 근무 기록을 바로 고친다 (기록이 없으면 새로 넣는다)
       if (ADMIN_SITE && date < todayDateString()) {
         setRecordTimes(id, date, start, end);
@@ -5784,6 +5873,7 @@ function storeFromRemote() {
   return cleanStore({
     employees,
     records: Object.values(pub.records ?? {}).map((json) => parse(json, null)).filter(Boolean),
+    changeRequests: pub.changeRequests ?? {},
     shifts: Object.fromEntries(Object.entries(pub.shifts ?? {}).map(([d, json]) => [d, parse(json, {})])),
     scheduleMeta: main.scheduleMeta ?? store.scheduleMeta,
     settings: main.settings,
