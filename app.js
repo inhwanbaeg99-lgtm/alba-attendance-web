@@ -703,9 +703,8 @@ function renderStaffItem(emp, date) {
       <button type="button" class="staff-name-btn" data-action="toggle-staff" data-id="${emp.id}"${editable ? "" : " disabled"}>
         <span class="staff-name">${nameLabel(emp, rec)}</span>
         ${done ? `<span class="badge done${rec.id === state.justAddedId ? " just" : ""}">출근 완료</span>` : ADMIN_SITE && date < today ? `<span class="badge none">기록 없음</span>` : ""}
-        <span class="staff-time${ADMIN_SITE && rec ? diffClass(emp, date, hoursBetween(rec.clockIn, rec.clockOut)) : ""}">${start} ~ ${end}</span>
+        <span class="staff-time${ADMIN_SITE && rec ? diffClass(emp, date, hoursBetween(rec.clockIn, rec.clockOut)) : ""}">${renderEmployeeChangeStatus(emp.id, date) || `${start} ~ ${end}`}</span>
       </button>
-      ${renderEmployeeChangeStatus(emp.id, date)}
       ${action ? `<div class="staff-action${state.expandEnter ? " enter" : ""}">${action}</div>` : ""}
     </li>`;
 }
@@ -804,8 +803,8 @@ function renderEmployeeChangeStatus(empId, date) {
   const r = shiftChangeRequests().filter(r => r.employeeId === empId && r.date === date)
     .sort((a,b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
   if (!r || ["pending", "processing", "rejected"].includes(r.status)) return "";
-  const label = {pending:"승인 대기",processing:"승인 처리 중",approved:"승인 완료",rejected:"반려됨"}[r.status] || "";
-  return `<p class="change-note">${esc(label)} · 요청 ${esc(r.start)} ~ ${esc(r.end)}</p>`;
+  if (r.status !== "approved") return "";
+  return `${esc(r.beforeStart)} ~ ${esc(r.beforeEnd)} <span aria-label="변경 후">→</span> <strong>${esc(r.start)} ~ ${esc(r.end)}</strong>`;
 }
 function renderChangeRequests(date) {
   if (!isAdmin()) return "";
