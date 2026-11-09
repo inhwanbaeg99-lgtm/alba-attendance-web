@@ -817,7 +817,7 @@ function renderEmployeeChangeStatus(empId, date) {
   const baseline = requestBaseline(emp, date, r);
   const worked = hoursBetween(kstIso(date, r.start), endIso(date, r.start, r.end));
   const color = emp ? diffClass(emp, date, worked) : "";
-  return `<span class="approved-change${color}">${esc(baseline.start)} ~ ${esc(baseline.end)} <span aria-label="변경 후">→</span> <strong>${esc(r.start)} ~ ${esc(r.end)}</strong></span>`;
+  return `<span class="approved-change">${esc(baseline.start)} ~ ${esc(baseline.end)} <span aria-label="변경 후">→</span> <strong class="approved-new-time${color}">${esc(r.start)} ~ ${esc(r.end)}</strong></span>`;
 }
 function renderChangeRequests(date) {
   if (!isAdmin()) return "";

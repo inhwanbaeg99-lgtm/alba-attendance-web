@@ -6249,8 +6249,8 @@ body.sc-drag-resize * {
 
 /* 승인된 변경 시간은 원래 요일 근무표의 총 시간과 비교 */
 .staff-time .approved-change{color:var(--ink)}
-.staff-time .approved-change.under{color:var(--red)}
-.staff-time .approved-change.over{color:#3182f6}
+.staff-time .approved-change .approved-new-time.under{color:var(--red)}
+.staff-time .approved-change .approved-new-time.over{color:#3182f6}
 .staff-time .approved-change strong{color:inherit}
 
 .change-request .request-time{color:var(--ink)}
