@@ -811,6 +811,9 @@ function renderEmployeeChangeStatus(empId, date) {
   if (!r || ["pending", "processing", "rejected"].includes(r.status)) return "";
   if (r.status !== "approved") return "";
   const emp = employeeById(empId);
+  // 관리자가 근무표대로 복원한 뒤에는 과거 승인 시간을 현재 시간처럼 표시하지 않는다.
+  const current = emp && shiftFor(emp, date);
+  if (!current || current.start !== r.start || current.end !== r.end) return "";
   const baseline = requestBaseline(emp, date, r);
   const worked = hoursBetween(kstIso(date, r.start), endIso(date, r.start, r.end));
   const color = emp ? diffClass(emp, date, worked) : "";
