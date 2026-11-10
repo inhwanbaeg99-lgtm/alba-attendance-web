@@ -5098,11 +5098,12 @@ app.addEventListener("click", (e) => {
         break;
       }
       setShift(id, date, start, end);
-      // 이미 출근했다면 기록 시간도 함께 고친다
+      // 이미 출근했다면 기록 시간도 함께 고친다 (직원이 찍은 출근 시각이어도 관리자가 고친 시간이 우선)
       const rec = recordFor(id, date);
       if (rec) {
-        if (!rec.punchedAt) rec.clockIn = kstIso(date, start);
+        rec.clockIn = kstIso(date, start);
         rec.clockOut = scheduledEnd(emp, date);
+        if (rec.punchedAt) rec.edited = true;
       }
       save();
       queueToast(`${emp.name}님 근무 시간을 바꿨어요`);
