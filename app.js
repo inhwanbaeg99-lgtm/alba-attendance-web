@@ -678,14 +678,14 @@ function renderDateBox(date, { closable }) {
 function renderStaffItem(emp, date) {
   const today = todayDateString();
   const isToday = date === today;
-  const editable = ADMIN_SITE || date >= today;
   const rec = recordFor(emp.id, date);
   const done = Boolean(rec?.clockIn);
   // 관리자 화면에서는 기록이 있으면 기록된 시간을 보여준다
   const shift = shiftFor(emp, date);
   const start = ADMIN_SITE && rec ? formatTime(rec.clockIn) : shift.start;
   const end = ADMIN_SITE && rec ? formatTime(rec.clockOut) : shift.end;
-  const expanded = editable && state.expandedId === emp.id;
+  // 직원도 지난 날짜에 수정 요청을 보낼 수 있다 (승인 전까지 기록은 그대로)
+  const expanded = state.expandedId === emp.id;
   const changePending = !ADMIN_SITE && shiftChangeRequests().some(r =>
     r.employeeId === emp.id && r.date === date && ["pending", "processing"].includes(r.status));
 
@@ -705,7 +705,7 @@ function renderStaffItem(emp, date) {
 
   return `
     <li class="staff-item${expanded ? " expanded" : ""}">
-      <button type="button" class="staff-name-btn" data-action="toggle-staff" data-id="${emp.id}"${editable ? "" : " disabled"}>
+      <button type="button" class="staff-name-btn" data-action="toggle-staff" data-id="${emp.id}">
         <span class="staff-name">${nameLabel(emp, rec)}</span>
         ${done ? `<span class="badge done${rec.id === state.justAddedId ? " just" : ""}">출근 완료</span>` : ADMIN_SITE && date < today ? `<span class="badge none">기록 없음</span>` : ""}
         <span class="staff-time${ADMIN_SITE && rec ? diffClass(emp, date, hoursBetween(rec.clockIn, rec.clockOut)) : ""}">${renderEmployeeChangeStatus(emp.id, date, start, end) || `${start} ~ ${end}`}</span>
@@ -753,7 +753,7 @@ function renderStaff(date) {
   const today = todayDateString();
   const isToday = date === today;
   let scheduled = scheduledOn(date);
-  let sub = isToday ? "본인 이름을 눌러 출근하세요" : date > today ? "이름을 눌러 시간을 수정할 수 있어요" : "지난 날짜예요";
+  let sub = isToday ? "본인 이름을 눌러 출근하세요" : date > today ? "이름을 눌러 시간을 수정할 수 있어요" : "이름을 눌러 근무 시간 수정을 요청할 수 있어요";
   if (ADMIN_SITE) {
     // 근무 예정인 사람 + 근무표에 없지만 그날 기록이 있는 사람
     const ids = new Set(scheduled.map((e) => e.id));
